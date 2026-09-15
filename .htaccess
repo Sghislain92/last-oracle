@@ -1,0 +1,103 @@
+RewriteEngine On
+
+# Apache/mod_php ne transmet PAS l'en-tête Authorization à PHP par
+# défaut (comportement historique, source classique de faux 401) — on
+# le force explicitement ici, avant toute autre règle.
+RewriteCond %{HTTP:Authorization} ^(.+)$
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# /installer sert index.html tel quel — c'est le JS (isInstallLandingPath,
+# détection sur location.pathname) qui affiche l'écran d'installation
+# dédié. Équivalent Apache du rewrite qu'on avait dans vercel.json.
+RewriteRule ^installer/?$ index.html [L]
+
+# ================================================================
+# ROUTES FAÇADE — cache les vrais noms de fichiers PHP (et le fait
+# même que le back soit en PHP) derrière des chemins neutres. Un
+# attaquant qui inspecte le JS ne voit plus "login.php",
+# "import-immatriculations.php" etc. — juste des noms d'action.
+#
+# [QSA] : conserve la chaîne de requête d'origine (?type=vin&value=...)
+# lors du réacheminement interne — indispensable pour les routes GET
+# avec paramètres.
+# ================================================================
+RewriteRule ^api/session/start/?$      api/auth/login.php [L,QSA]
+RewriteRule ^api/session/current/?$    api/auth/me.php [L,QSA]
+RewriteRule ^api/accounts/create/?$    api/auth/register.php [L,QSA]
+RewriteRule ^api/accounts/list/?$      api/auth/users.php [L,QSA]
+RewriteRule ^api/accounts/modify/?$    api/admin/update-user.php [L,QSA]
+RewriteRule ^api/accounts/incidents/?$ api/auth/errors.php [L,QSA]
+RewriteRule ^api/accounts/activity/?$  api/auth/user-history.php [L,QSA]
+RewriteRule ^api/accounts/events/?$    api/auth/user-logs.php [L,QSA]
+RewriteRule ^api/telemetry/event/?$    api/sync/log.php [L,QSA]
+RewriteRule ^api/telemetry/checkin/?$  api/sync/search.php [L,QSA]
+RewriteRule ^api/telemetry/device/?$   api/track-install.php [L,QSA]
+RewriteRule ^api/registry/report/?$    api/sync/immatriculations.php [L,QSA]
+RewriteRule ^api/registry/bulk/?$      api/admin/import-immatriculations.php [L,QSA]
+RewriteRule ^api/registry/lookup/?$    api/search-registry.php [L,QSA]
+RewriteRule ^api/registry/feed/?$      api/sync-delta.php [L,QSA]
+RewriteRule ^api/registry/stats/?$     api/registry-count.php [L,QSA]
+RewriteRule ^api/gateway/?$            api/proxy.php [L,QSA]
+RewriteRule ^api/accounts/keys/?$      api/admin/api-keys.php [L,QSA]
+RewriteRule ^api/accounts/keys/revoke/?$ api/admin/revoke-api-key.php [L,QSA]
+RewriteRule ^api/accounts/insights/?$  api/admin/ai-insights.php [L,QSA]
+RewriteRule ^api/accounts/backfill/?$  api/admin/backfill-normalized.php [L,QSA]
+
+# PORTAIL PARTENAIRES — même principe que ci-dessus, appliqué à
+# api/portal/*.php (auparavant appelés en direct par
+# api-portal/assets/app.js, ce qui les faisait tomber sous le coup du
+# blocage générique plus bas -> 403 systématique sur login/register/etc.
+# Espace de nommage "partners" séparé de "accounts"/"session" pour ne
+# jamais confondre un compte partenaire API et un compte agent Oracle.
+RewriteRule ^api/partners/session/start/?$   api/portal/login.php [L,QSA]
+RewriteRule ^api/partners/session/create/?$  api/portal/register.php [L,QSA]
+RewriteRule ^api/partners/session/current/?$ api/portal/me.php [L,QSA]
+RewriteRule ^api/partners/session/end/?$     api/portal/logout.php [L,QSA]
+RewriteRule ^api/partners/keys/?$            api/portal/keys.php [L,QSA]
+RewriteRule ^api/partners/keys/revoke/?$     api/portal/revoke-key.php [L,QSA]
+RewriteRule ^api/partners/activity/?$        api/portal/activity.php [L,QSA]
+RewriteRule ^api/partners/incidents/?$       api/portal/errors.php [L,QSA]
+RewriteRule ^api/partners/usage/?$           api/portal/usage.php [L,QSA]
+RewriteRule ^api/partners/keys/delete/?$     api/portal/delete-key.php [L,QSA]
+RewriteRule ^api/partners/profile/update/?$  api/portal/update-profile.php [L,QSA]
+RewriteRule ^api/partners/profile/password/?$ api/portal/change-password.php [L,QSA]
+RewriteRule ^api/partners/errors/report/?$ api/portal/log-client-error.php [L,QSA]
+
+# API PUBLIQUE EXTERNE — destinée à être appelée par d'autres
+# applications (MotoScan, etc.), authentifiée par clé (X-API-Key), pas
+# par jeton utilisateur. Chemin stable et versionné à dessein (v1) —
+# contrairement aux routes façades ci-dessus, celui-ci EST le contrat
+# documenté à donner aux intégrateurs, pas quelque chose à cacher.
+RewriteRule ^api/v1/vehicles/lookup/?$ api/external/vehicle-lookup.php [L,QSA]
+
+# Bloque tout accès DIRECT aux vrais fichiers .php sous /api/ — seule la
+# route façade ci-dessus doit pouvoir les atteindre. %{THE_REQUEST}
+# reflète la ligne brute envoyée par le client (avant toute réécriture),
+# donc une requête interne générée par les règles ci-dessus n'est
+# jamais concernée — seul un accès direct au vrai nom de fichier l'est.
+RewriteCond %{THE_REQUEST} \s/api/.*\.php[\s?] [NC]
+RewriteRule ^ - [F,L]
+
+# Cache-busting doux : empêche un navigateur/proxy intermédiaire de
+# mettre en cache une réponse d'API par erreur (les GET comme
+# registry/lookup ou registry/feed ne doivent JAMAIS être rejoués
+# depuis un cache partagé).
+<IfModule mod_headers.c>
+    <FilesMatch "\.php$">
+        Header set Cache-Control "no-store, no-cache, must-revalidate"
+    </FilesMatch>
+</IfModule>
+
+# Ne révèle pas la version d'Apache/PHP dans les en-têtes de réponse,
+# ni le contenu des dossiers sans index.
+ServerSignature Off
+Options -Indexes
+
+# N'affiche jamais les erreurs PHP au client (fuite de chemins de
+# fichiers, requêtes SQL, etc.) — elles restent dans le journal serveur.
+# Sur PHP-FPM, ces directives doivent parfois être répétées dans un
+# fichier .user.ini à la racine si ton hébergeur les ignore ici.
+<IfModule mod_php.c>
+    php_flag display_errors off
+    php_flag display_startup_errors off
+</IfModule>
