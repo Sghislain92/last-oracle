@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="fr" class="bg-slate-50">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Extraction data pour Oracle</title>
+  <meta name="description" content="Outil de contrôle et de vérification de véhicules par numéro de châssis (VIN) via le service public ANaTT." />
+  <meta name="theme-color" content="#0f766e" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window['pdfjsLib']) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdfa', 100: '#ccfbf1', 500: '#14b8a6',
+              600: '#0d9488', 700: '#0f766e', 800: '#115e59', 900: '#134e4a'
+            }
+          },
+          fontFamily: {
+            sans: ['ui-sans-serif', 'system-ui', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body { -webkit-font-smoothing: antialiased; }
+    .fade-in { animation: fadeIn .35s ease both; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+
+<body class="min-h-screen bg-slate-50 text-slate-800 font-sans">
+
+  <header class="border-b border-slate-200 bg-white">
+    <div class="mx-auto max-w-3xl px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-700 text-white">
+          <i data-lucide="shield-check" class="h-5 w-5"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold leading-tight text-slate-900">Oracle</h1>
+          <p class="text-xs text-slate-500">Vérification de véhicule — ANaTT</p>
+        </div>
+      </div>
+      <span class="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
+        <i data-lucide="badge-check" class="h-3.5 w-3.5"></i> Agent habilité
+      </span>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-3xl px-4 py-8">
+
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="text-base font-semibold text-slate-900">Recherche par numéro de châssis (VIN)</h2>
+      <p class="mt-1 text-sm text-slate-500">Saisissez le VIN à contrôler dans la base officielle.</p>
+
+      <form id="search-form" class="mt-4 flex flex-col gap-3 sm:flex-row">
+        <div class="relative flex-1">
+          <i data-lucide="hash" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+          <input id="vin" type="text" autocomplete="off" spellcheck="false"
+            placeholder="Ex : LATXCGLY3F1133907"
+            class="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 font-mono text-sm uppercase tracking-wide text-slate-900 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-100" />
+        </div>
+        <button id="search-btn" type="submit"
+          class="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-800 disabled:opacity-60">
+          <i data-lucide="search" class="h-4 w-4"></i>
+          <span>Vérifier</span>
+        </button>
+      </form>
+
+      <details class="mt-4 text-sm">
+        <summary class="cursor-pointer text-slate-500 hover:text-slate-700">Configuration du proxy</summary>
+        <div class="mt-2 rounded-lg bg-slate-50 p-3">
+          <label for="proxy" class="text-xs font-medium text-slate-600">Endpoint proxy (préfixe avant l'URL encodée)</label>
+          <input id="proxy" type="text" value="/api/gateway?url="
+            class="mt-1 w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-800 outline-none focus:border-brand-600" />
+          <p class="mt-1.5 text-xs text-slate-500">Requis pour contourner le CORS. Doit renvoyer HTML et PDF (arrayBuffer). Correspond à la route façade <code>api/gateway</code> déjà en place sur Oracle (<code>api/proxy.php</code>).</p>
+        </div>
+      </details>
+    </section>
+
+    <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="text-base font-semibold text-slate-900">Recherche par numéro de téléchargement</h2>
+      <p class="mt-1 text-sm text-slate-500">
+        Saisissez l’intervalle de certificats à analyser
+        (<span class="font-mono">/telechargement/{début}</span> → <span class="font-mono">{fin}</span>).
+      </p>
+
+      <form id="batch-form" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <div class="relative">
+          <i data-lucide="list-ordered" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+          <label for="start-num" class="mb-1 block text-xs font-medium text-slate-600">Début</label>
+          <input id="start-num" type="number" min="1" inputmode="numeric" autocomplete="off" required
+            placeholder="Ex : 544"
+            class="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 font-mono text-sm text-slate-900 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-100" />
+        </div>
+        <div class="relative">
+          <i data-lucide="list-end" class="pointer-events-none absolute left-3 top-[2.1rem] h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+          <label for="end-num" class="mb-1 block text-xs font-medium text-slate-600">Fin</label>
+          <input id="end-num" type="number" min="1" inputmode="numeric" autocomplete="off" required
+            placeholder="Ex : 900"
+            class="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-9 pr-3 font-mono text-sm text-slate-900 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-100" />
+        </div>
+        <button id="batch-btn" type="submit"
+          class="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-800 disabled:opacity-60">
+          <i data-lucide="layers" class="h-4 w-4"></i>
+          <span>Analyser l’intervalle</span>
+        </button>
+      </form>
+    </section>
+
+    <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="text-base font-semibold text-slate-900">Recherche par immatriculation</h2>
+      <p class="mt-1 text-sm text-slate-500">Le scan commence au certificat n° 1 et s’arrête lorsque l’immatriculation est trouvée. Le résultat est téléchargé automatiquement en JSON.</p>
+      <form id="plate-scan-form" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <div>
+          <label for="target-plate" class="mb-1 block text-xs font-medium text-slate-600">Immatriculation recherchée</label>
+          <input id="target-plate" type="text" autocomplete="off" spellcheck="false" required placeholder="Ex : 2CR 0770 RB"
+            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-mono text-sm uppercase text-slate-900 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-100" />
+        </div>
+        <div>
+          <label for="plate-max-num" class="mb-1 block text-xs font-medium text-slate-600">Limite maximale de certificats</label>
+          <input id="plate-max-num" type="number" min="1" max="100000" value="100000" required
+            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-mono text-sm text-slate-900 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-100" />
+        </div>
+        <button id="plate-scan-btn" type="submit" class="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-800 disabled:opacity-60">
+          <i data-lucide="scan-search" class="h-4 w-4"></i><span>Lancer la recherche</span>
+        </button>
+      </form>
+      <div id="plate-scan-controls" class="mt-4 hidden rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm"></div>
+    </section>
+
+    <div id="resume-banner" class="mt-4 hidden fade-in rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <span id="resume-text"></span>
+        <div class="flex gap-2">
+          <button id="resume-continue" type="button" class="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">Reprendre</button>
+          <button id="resume-download" type="button" class="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100">Télécharger le niveau actuel</button>
+          <button id="resume-discard" type="button" class="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100">Ignorer</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="status" class="mt-4 hidden fade-in"></div>
+    <section id="result" class="mt-4 hidden fade-in"></section>
+    <section id="batch-result" class="mt-4 hidden fade-in"></section>
+
+  </main>
+
+  <footer class="mx-auto max-w-3xl px-4 pb-10 pt-2">
+    <p class="text-xs leading-relaxed text-slate-400">
+      Consultation ponctuelle réservée aux missions de contrôle officielles par des agents habilités.
+      Les données sont utilisées uniquement à des fins de traçabilité des vérifications.
+    </p>
+  </footer>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const form = $('search-form');
+    const statusEl = $('status');
+    const resultEl = $('result');
+    const btn = $('search-btn');
+
+    const ANATT_BASE = 'https://www.moto.anatt.bj';
+
+    const PAUSE_ENTRE_REQUETES_MS = 250;
+    const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    function setStatus(type, message) {
+      const styles = {
+        loading: 'border-brand-200 bg-brand-50 text-brand-800',
+        error:   'border-red-200 bg-red-50 text-red-700',
+        info:    'border-slate-200 bg-slate-50 text-slate-600',
+        success: 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      };
+      const icon = { loading: 'loader-2', error: 'alert-triangle', info: 'info', success: 'check-circle-2' }[type];
+      const spin = type === 'loading' ? 'spin' : '';
+      statusEl.className = 'mt-4 fade-in rounded-lg border px-4 py-3 text-sm flex items-center gap-2 ' + styles[type];
+      statusEl.innerHTML = `<i data-lucide="${icon}" class="h-4 w-4 ${spin}"></i><span>${message}</span>`;
+      statusEl.classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function clearStatus() { statusEl.classList.add('hidden'); statusEl.innerHTML = ''; }
+
+    function extraireDonnees(html) {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const text = doc.body ? doc.body.textContent.replace(/\s+/g, ' ').trim() : '';
+      const find = (labels) => {
+        for (const label of labels) {
+          const re = new RegExp(label + '\\s*[:\\-]?\\s*([A-Z0-9ÉÈÀÂÊÎÔÛÇ\\- ]{2,60})', 'i');
+          const m = text.match(re);
+          if (m) return m[1].trim();
+        }
+        return null;
+      };
+      let anattId = null;
+      doc.querySelectorAll('a[href*="/telechargement/"]').forEach((a) => {
+        const m = a.getAttribute('href').match(/telechargement\/(\d+)/);
+        if (m) anattId = m[1];
+      });
+      const data = {
+        proprietaire: nettoyerNomPrenom(find(['Propriétaire', 'Proprietaire', 'Nom'])),
+        chassis: find(['N.?\\s*Châssis', 'Chassis', 'VIN']),
+        matricule: find(['Matricule', 'Plaque', 'Immatriculation']),
+        annexe: find(['Annexe de', 'Annexe', 'Département', 'Departement']),
+        numero: find(['N°', 'Numéro', 'Numero']),
+        anattId
+      };
+      const found = Object.values(data).some((v) => v);
+      return { data, found, raw: text.slice(0, 500) };
+    }
+
+    function renderResult(data) {
+      const rows = [
+        { label: 'N°', value: data.numero, icon: 'hash' },
+        { label: 'Propriétaire', value: data.proprietaire, icon: 'user' },
+        { label: 'N° Châssis', value: data.chassis, icon: 'fingerprint' },
+        { label: 'Matricule', value: data.matricule, icon: 'car' },
+        { label: 'Annexe de', value: data.annexe, icon: 'map-pin' }
+      ];
+      resultEl.innerHTML = `
+        <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="flex items-center gap-2 border-b border-slate-100 bg-brand-50 px-6 py-4">
+            <i data-lucide="check-circle-2" class="h-5 w-5 text-brand-700"></i>
+            <h3 class="text-sm font-semibold text-brand-900">Véhicule trouvé dans la base ANaTT</h3>
+          </div>
+          <dl class="divide-y divide-slate-100">
+            ${rows.map((r) => `
+              <div class="flex items-center gap-4 px-6 py-3.5">
+                <dt class="flex w-40 shrink-0 items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+                  <i data-lucide="${r.icon}" class="h-4 w-4"></i>${r.label}
+                </dt>
+                <dd class="font-mono text-sm ${r.value ? 'text-slate-900' : 'text-slate-300'}">${r.value || '—'}</dd>
+              </div>`).join('')}
+          </dl>
+          ${data.anattId ? `
+          <div class="flex flex-wrap gap-3 border-t border-slate-100 px-6 py-4">
+            <button id="read-cert" data-id="${data.anattId}"
+              class="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-800">
+              <i data-lucide="file-search" class="h-4 w-4"></i> Analyser le certificat (PDF)
+            </button>
+            <button id="dl-cert" data-id="${data.anattId}"
+              class="inline-flex items-center gap-2 rounded-lg border border-brand-700 px-4 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-50">
+              <i data-lucide="file-down" class="h-4 w-4"></i> Télécharger
+            </button>
+          </div>` : ''}
+        </div>
+        <div id="cert-info" class="mt-4"></div>`;
+      resultEl.classList.remove('hidden');
+      lucide.createIcons();
+      const read = $('read-cert');
+      if (read) read.addEventListener('click', () => analyserCertificat(read.dataset.id));
+      const dl = $('dl-cert');
+      if (dl) dl.addEventListener('click', () => telechargerCertificat(dl.dataset.id));
+    }
+
+    async function recupererPdf(anattId) {
+      const proxy = $('proxy').value.trim();
+      const target = `${ANATT_BASE}/telechargement/${anattId}`;
+      const resp = await fetch(proxy + encodeURIComponent(target));
+      if (!resp.ok) throw new Error(`Erreur ${resp.status} lors de la récupération du PDF.`);
+      const buffer = await resp.arrayBuffer();
+      const entete = new Uint8Array(buffer.slice(0, 5));
+      const estPdf = entete[0] === 0x25 && entete[1] === 0x50 && entete[2] === 0x44 && entete[3] === 0x46;
+      if (!estPdf || buffer.byteLength < 200) {
+        throw new Error('Réponse invalide (pas un PDF) — probablement un blocage temporaire côté source ou proxy.');
+      }
+      return buffer;
+    }
+
+    async function avecReessai(fn, tentatives = 2, delaiMs = 1000) {
+      let derniereErreur;
+      for (let t = 0; t <= tentatives; t++) {
+        try { return await fn(); }
+        catch (e) { derniereErreur = e; if (t < tentatives) await new Promise((r) => setTimeout(r, delaiMs)); }
+      }
+      throw derniereErreur;
+    }
+
+    function nettoyerNomPrenom(valeur) {
+      if (valeur == null) return null;
+      const propre = String(valeur).replace(/,/g, '').replace(/\s{2,}/g, ' ').trim();
+      return propre || null;
+    }
+
+    async function extraireTextePdf(buffer) {
+      const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+      const lignes = [];
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        const groupes = {};
+        content.items.forEach((it) => {
+          if (!it.str) return;
+          const y = Math.round(it.transform[5]);
+          (groupes[y] = groupes[y] || []).push(it);
+        });
+        Object.keys(groupes)
+          .sort((a, b) => Number(b) - Number(a))
+          .forEach((y) => {
+            const ligne = groupes[y]
+              .sort((a, b) => a.transform[4] - b.transform[4])
+              .map((i) => i.str).join(' ').replace(/[ \t]+/g, ' ').trim();
+            if (ligne) lignes.push(ligne);
+          });
+      }
+      return lignes;
+    }
+
+    function parserCertificat(lignes) {
+      const texte = lignes.join('\n');
+      const indexOu = (re) => lignes.findIndex((l) => re.test(l));
+      const ligneApres = (re) => {
+        const i = indexOu(re);
+        return i >= 0 && i + 1 < lignes.length ? lignes[i + 1].trim() : null;
+      };
+      let proprietaire = null;
+      const iProp = indexOu(/Propri[ée]taire du v[ée]hicule/i);
+      if (iProp > 0) {
+        let j = iProp - 1;
+        while (j >= 0 && /^(M\.?|Mme\.?|Mlle\.?)$/i.test(lignes[j].trim())) j--;
+        if (j >= 0) proprietaire = nettoyerNomPrenom(lignes[j].replace(/^(M\.?|Mme\.?|Mlle\.?)\s*/i, ''));
+      }
+      const chassis = ligneApres(/ch[aâ]ssis est\s*:?\s*$/i) || ligneApres(/ch[aâ]ssis est\s*:?/i);
+      const matricule = ligneApres(/sous le matricule\s*:?/i);
+      let annexe = null;
+      const departementNonSpecifie = /est\s+pri[ée]\s+de\s+se\s+rapprocher\s+de\s+l['’]annexe\s+de/i.test(texte) ||
+        /pour\s+le\s+retrait\s+de\s+la\s+carte\s+grise\s+et\s+la\s+fixation\s+de\s+la\s+plaque\s+min[ée]ralogique\s*\.?/i.test(texte);
+      if (departementNonSpecifie) {
+        annexe = 'Non spécifié';
+      } else {
+        const mAnnexe = texte.match(/annexe de\s+([A-ZÉÈÀÂÊÎÔÛÇ][A-ZÉÈÀÂÊÎÔÛÇ '’\-]+)/i);
+        if (mAnnexe) annexe = mAnnexe[1].replace(/\s+pour\b[\s\S]*/i, '').trim();
+      }
+      let numero = null;
+      const mNum = texte.match(/N[°ºo]\s*(\d{2,})/i);
+      if (mNum) numero = mNum[1];
+      return { proprietaire, chassis, matricule, annexe, numero };
+    }
+
+    async function analyserCertificat(anattId) {
+      const zone = $('cert-info');
+      try {
+        setStatus('loading', 'Analyse du certificat PDF…');
+        const buffer = await recupererPdf(anattId);
+        const lignes = await extraireTextePdf(buffer);
+        const texte = lignes.join('\n');
+        const champs = parserCertificat(lignes);
+        clearStatus();
+        const rows = [
+          { label: 'N° Certificat', value: champs.numero, icon: 'hash' },
+          { label: 'Propriétaire', value: champs.proprietaire, icon: 'user' },
+          { label: 'N° Châssis', value: champs.chassis, icon: 'fingerprint' },
+          { label: 'Matricule', value: champs.matricule, icon: 'car' },
+          { label: 'Annexe de', value: champs.annexe, icon: 'map-pin' }
+        ];
+        zone.innerHTML = `
+          <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden fade-in">
+            <div class="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-6 py-4">
+              <i data-lucide="file-text" class="h-5 w-5 text-slate-600"></i>
+              <h3 class="text-sm font-semibold text-slate-800">Informations extraites du certificat</h3>
+            </div>
+            <dl class="grid grid-cols-1 sm:grid-cols-2 gap-px bg-slate-100">
+              ${rows.map((r) => `
+                <div class="bg-white px-6 py-3.5">
+                  <dt class="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+                    <i data-lucide="${r.icon}" class="h-4 w-4"></i>${r.label}
+                  </dt>
+                  <dd class="mt-1 font-mono text-sm ${r.value ? 'text-slate-900' : 'text-slate-300'}">${r.value || '—'}</dd>
+                </div>`).join('')}
+            </dl>
+            <details class="border-t border-slate-100 px-6 py-3 text-sm">
+              <summary class="cursor-pointer text-slate-500 hover:text-slate-700">Texte brut extrait</summary>
+              <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 font-mono text-xs text-slate-600">${texte.replace(/[<>&]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</pre>
+            </details>
+          </div>`;
+        lucide.createIcons();
+      } catch (e) {
+        setStatus('error', e.message);
+      }
+    }
+
+    async function verifierChassis(vin) {
+      const proxy = $('proxy').value.trim();
+      const target = `${ANATT_BASE}/recherche?search_type=chassis&search=${encodeURIComponent(vin)}`;
+      const url = proxy + encodeURIComponent(target);
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Le proxy a répondu ${resp.status}. Vérifiez sa configuration.`);
+      const html = await resp.text();
+      return extraireDonnees(html);
+    }
+
+    function normaliserImmatriculation(valeur) {
+      return String(valeur || '').toUpperCase().replace(/[\s-]+/g, '');
+    }
+
+    function telechargerJsonRecherche(cible, numeroTrouve, lignes) {
+      const contenu = JSON.stringify(lignes, null, 2);
+      const numeros = lignes.map((ligne) => Number(ligne.numero)).filter(Number.isInteger);
+      const fin = numeros.length ? Math.max(...numeros) : numeroTrouve;
+      const fichier = `Recherche-${normaliserImmatriculation(cible)}-1-${fin}.json`;
+      const blob = new Blob([contenu], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fichier;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    // Extraction CÔTÉ SERVEUR — le navigateur ne télécharge plus le PDF
+    // (200-300 Ko) ni ne fait tourner pdf.js par certificat : le serveur
+    // télécharge, extrait (pdftotext) et parse, puis renvoie directement
+    // le JSON final. Gain de bande passante et de temps considérable sur
+    // un scan de plusieurs milliers de certificats.
+    // Jeton de session de l'app agent Oracle — stocké dans localStorage
+    // (pas un cookie), partagé avec reverse-immat puisqu'ils vivent sur
+    // le même domaine. Sans l'en-tête Authorization reconstruit à partir
+    // de ce jeton, toute route protégée par requireAuth() côté serveur
+    // répond systématiquement "Authentification requise."
+    const ORACLE_SESSION_KEY = 'oracle_auth_session_v1';
+    function obtenirJetonOracle() {
+      try {
+        const brut = localStorage.getItem(ORACLE_SESSION_KEY);
+        const session = brut ? JSON.parse(brut) : null;
+        return session && session.token ? session.token : null;
+      } catch (_) { return null; }
+    }
+    function enTetesOracle() {
+      const jeton = obtenirJetonOracle();
+      return jeton ? { Authorization: `Bearer ${jeton}` } : {};
+    }
+
+    async function extraireLigneServeur(numero) {
+      const resp = await fetch(`/api/registry/extract-certificate?numero=${numero}`, { headers: enTetesOracle() });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data) throw new Error(data?.error || `Erreur serveur (${resp.status}) — certificat ${numero}.`);
+      return data; // { numero, nomPrenom, immatriculation, departement, chassis, statut }
+    }
+
+    async function extraireLigneRecherche(numero) {
+      return extraireLigneServeur(numero);
+    }
+
+    async function telechargerCertificat(anattId) {
+      try {
+        setStatus('loading', 'Récupération du certificat…');
+        const proxy = $('proxy').value.trim();
+        const target = `${ANATT_BASE}/telechargement/${anattId}`;
+        const resp = await fetch(proxy + encodeURIComponent(target));
+        if (!resp.ok) throw new Error(`Erreur ${resp.status} lors du téléchargement.`);
+        const buffer = await resp.arrayBuffer();
+        const blob = new Blob([buffer], { type: 'application/pdf' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `certificat-${anattId}.pdf`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        clearStatus();
+      } catch (e) {
+        setStatus('error', e.message);
+      }
+    }
+
+    const plateScanForm = $('plate-scan-form');
+    const plateScanBtn = $('plate-scan-btn');
+    const CLE_SCAN_IMMAT = 'oracle_plate_scan_progression';
+    let plateScanState = null;
+    let plateScanRunning = false;
+
+    function sauverScanImmat() {
+      if (!plateScanState) return;
+      try { localStorage.setItem(CLE_SCAN_IMMAT, JSON.stringify({ ...plateScanState, majLe: Date.now() })); } catch (_) {}
+    }
+    function chargerScanImmat() {
+      try {
+        const etat = JSON.parse(localStorage.getItem(CLE_SCAN_IMMAT) || 'null');
+        if (etat && Array.isArray(etat.lignes) && etat.lignes.length) return etat;
+      } catch (_) {}
+      return null;
+    }
+    function effacerScanImmat() { localStorage.removeItem(CLE_SCAN_IMMAT); }
+
+    function obtenirDoublonsScan(lignes) {
+      const groupes = new Map();
+      lignes.forEach((ligne) => {
+        if (!ligneCompleteEtOK(ligne)) return;
+        const cle = cleDoublon(ligne);
+        if (!groupes.has(cle)) groupes.set(cle, []);
+        groupes.get(cle).push(ligne);
+      });
+      return [...groupes.values()].filter((groupe) => groupe.length > 1);
+    }
+
+    function afficherControlesScan() {
+      const zone = $('plate-scan-controls');
+      if (!zone || !plateScanState) return;
+      const erreurs = plateScanState.lignes.filter((ligne) => ligne.statut === 'Erreur');
+      const doublons = obtenirDoublonsScan(plateScanState.lignes);
+      const pause2 = Boolean(plateScanState.paused);
+      zone.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-3">
+        <span>${plateScanState.lignes.length} ligne(s) analysée(s)${plateScanState.numeroTrouve ? ` — cible trouvée au n° ${plateScanState.numeroTrouve}` : ''}${erreurs.length ? ` — ${erreurs.length} erreur(s)` : ''}${doublons.length ? ` — ${doublons.length} groupe(s) en doublon` : ''}</span>
+        <div class="flex flex-wrap gap-2">
+          ${plateScanRunning && !pause2 ? `<button id="plate-pause" type="button" class="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white"><i data-lucide="pause" class="mr-1 inline h-3.5 w-3.5"></i>Pause</button>` : ''}
+          ${pause2 ? `<button id="plate-continue" type="button" class="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white"><i data-lucide="play" class="mr-1 inline h-3.5 w-3.5"></i>Continuer</button><button id="plate-download" type="button" class="rounded-lg border border-amber-600 px-3 py-1.5 text-xs font-semibold text-amber-700"><i data-lucide="download" class="mr-1 inline h-3.5 w-3.5"></i>Télécharger le JSON</button>` : ''}
+          ${erreurs.length && (pause2 || !plateScanRunning) ? `<button id="plate-errors" type="button" class="rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white"><i data-lucide="rotate-cw" class="mr-1 inline h-3.5 w-3.5"></i>Gérer les erreurs (${erreurs.length})</button>` : ''}
+          ${doublons.length && (pause2 || !plateScanRunning) ? `<button id="plate-merge" type="button" class="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white"><i data-lucide="copy-check" class="mr-1 inline h-3.5 w-3.5"></i>Fusionner les doublons (${doublons.length})</button>` : ''}
+        </div>
+      </div>`;
+      zone.classList.remove('hidden');
+      lucide.createIcons();
+      const pauseBtn = $('plate-pause');
+      if (pauseBtn) pauseBtn.onclick = () => { plateScanState.paused = true; sauverScanImmat(); afficherControlesScan(); setStatus('info', 'Recherche par immatriculation mise en pause.'); };
+      const continueBtn = $('plate-continue');
+      if (continueBtn) continueBtn.onclick = () => { plateScanState.paused = false; sauverScanImmat(); lancerRechercheImmatriculation(); };
+      const dl = $('plate-download');
+      if (dl) dl.onclick = () => telechargerJsonRecherche(plateScanState.cible, plateScanState.numeroTrouve, plateScanState.lignes);
+      const err = $('plate-errors');
+      if (err) err.onclick = () => gererErreursScan();
+      const merge = $('plate-merge');
+      if (merge) merge.onclick = () => fusionnerDoublonsScan();
+    }
+
+    async function gererErreursScan() {
+      if (!plateScanState) return;
+      const erreurs = plateScanState.lignes.filter((ligne) => ligne.statut === 'Erreur');
+      plateScanRunning = true;
+      for (const ancienne of erreurs) {
+        let corrigee = false;
+        for (let tentative = 1; tentative <= 3; tentative++) {
+          setStatus('loading', `Nouvelle tentative ${tentative}/3 de la ligne ${ancienne.numero}…`);
+          try {
+            const nouvelle = await extraireLigneRecherche(ancienne.numero);
+            const index = plateScanState.lignes.findIndex((ligne) => Number(ligne.numero) === Number(ancienne.numero));
+            if (index !== -1) plateScanState.lignes[index] = nouvelle;
+            corrigee = true;
+            break;
+          } catch (erreur) {
+            ancienne.erreur = erreur.message;
+            if (tentative < 3) await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+        }
+        sauverScanImmat();
+        afficherControlesScan();
+        if (!corrigee) ancienne.statut = 'Erreur';
+      }
+      plateScanRunning = false;
+      afficherControlesScan();
+      setStatus('success', 'Nouvelle analyse des lignes erronées terminée.');
+    }
+
+    function fusionnerDoublonsScan() {
+      if (!plateScanState) return;
+      const groupes = obtenirDoublonsScan(plateScanState.lignes);
+      const aSupprimer = new Set(groupes.flatMap((groupe) => groupe.slice(1).map((ligne) => Number(ligne.numero))));
+      plateScanState.lignes = plateScanState.lignes.filter((ligne) => !aSupprimer.has(Number(ligne.numero)));
+      sauverScanImmat();
+      afficherControlesScan();
+      setStatus('success', `${aSupprimer.size} doublon(s) fusionné(s), une seule ligne conservée par groupe.`);
+    }
+
+    const SEUIL_COUPE_CIRCUIT = 5;
+    function detecterEchecSysteme(lignes) {
+      if (lignes.length < SEUIL_COUPE_CIRCUIT) return null;
+      const dernieres = lignes.slice(-SEUIL_COUPE_CIRCUIT);
+      const toutesEnErreur = dernieres.every((l) => l.statut === 'Erreur');
+      if (!toutesEnErreur) return null;
+      const messages = new Set(dernieres.map((l) => l.erreur));
+      if (messages.size === 1) return [...messages][0];
+      return null;
+    }
+
+    // Nombre de certificats traités EN PARALLÈLE dans chaque cycle — 1
+    // seul à la fois est prudent mais lent ; 3 reste raisonnable pour
+    // ANaTT (bien loin d'un usage abusif) tout en multipliant le débit
+    // par environ 3. La pause entre CYCLES (pas entre requêtes
+    // individuelles) reste appliquée, donc le rythme global de
+    // sollicitation d'ANaTT n'explose pas, seul le nombre de requêtes
+    // menées de front à chaque cycle augmente.
+    const CONCURRENCE = 3;
+
+    // Vérifie d'abord si la plaque est déjà connue du registre Oracle —
+    // si oui, réponse immédiate, aucun scan ANaTT nécessaire. Nécessite
+    // d'être connecté à Oracle dans ce même navigateur (jeton partagé via
+    // localStorage, même domaine) ; sinon, bascule silencieusement sur
+    // le scan complet, comme avant.
+    async function verifierDansOracle(plaque) {
+      try {
+        const resp = await fetch(`/api/registry/lookup?type=immat&value=${encodeURIComponent(plaque)}`, { headers: enTetesOracle() });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return (data && data.found) ? data.current : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function afficherResultatOracle(vehicule, cible) {
+      resultEl.innerHTML = `
+        <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="flex items-center gap-2 border-b border-slate-100 bg-brand-50 px-6 py-4">
+            <i data-lucide="zap" class="h-5 w-5 text-brand-700"></i>
+            <h3 class="text-sm font-semibold text-brand-900">Déjà dans le registre Oracle — aucun scan nécessaire</h3>
+          </div>
+          <dl class="divide-y divide-slate-100">
+            ${[
+              ['Immatriculation', vehicule.plate || cible, 'credit-card'],
+              ['Propriétaire', vehicule.owner, 'user'],
+              ['N° Châssis', vehicule.vin, 'fingerprint'],
+              ['Département', vehicule.department, 'map-pin']
+            ].map(([label, value, icon]) => `
+              <div class="flex items-center gap-4 px-6 py-3.5">
+                <dt class="flex w-40 shrink-0 items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+                  <i data-lucide="${icon}" class="h-4 w-4"></i>${label}
+                </dt>
+                <dd class="font-mono text-sm ${value ? 'text-slate-900' : 'text-slate-300'}">${value || '—'}</dd>
+              </div>`).join('')}
+          </dl>
+        </div>`;
+      resultEl.classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    async function lancerRechercheImmatriculation(etatInitial = null) {
+      if (etatInitial) plateScanState = etatInitial;
+      if (!plateScanState) return;
+      const cibleNormalisee = normaliserImmatriculation(plateScanState.cible);
+      plateScanRunning = true;
+      plateScanBtn.disabled = true;
+      plateScanState.paused = false;
+      try {
+        if (!plateScanState.numeroTrouve) {
+          let numero = plateScanState.lignes.length + 1;
+          while (numero <= plateScanState.limite && !plateScanState.numeroTrouve) {
+            const chunk = [];
+            for (let i = 0; i < CONCURRENCE && numero + i <= plateScanState.limite; i++) chunk.push(numero + i);
+            setStatus('loading', `Recherche de ${plateScanState.cible} — certificats ${chunk[0]}–${chunk[chunk.length - 1]}/${plateScanState.limite}…`);
+
+            const resultats = await Promise.all(chunk.map(async (n) => {
+              try { return await extraireLigneRecherche(n); }
+              catch (erreur) { return { numero: n, nomPrenom: null, immatriculation: null, departement: null, chassis: null, statut: 'Erreur', erreur: erreur.message }; }
+            }));
+            resultats.sort((a, b) => a.numero - b.numero);
+            for (const ligne of resultats) {
+              plateScanState.lignes.push(ligne);
+              if (!plateScanState.numeroTrouve && normaliserImmatriculation(ligne.immatriculation) === cibleNormalisee) {
+                plateScanState.numeroTrouve = ligne.numero;
+              }
+            }
+            sauverScanImmat();
+            afficherControlesScan();
+
+            const echecSysteme = detecterEchecSysteme(plateScanState.lignes);
+            if (echecSysteme) {
+              plateScanState.paused = true;
+              sauverScanImmat();
+              setStatus('error', `Arrêt automatique : les ${SEUIL_COUPE_CIRCUIT} derniers certificats ont tous échoué avec la même erreur (« ${echecSysteme} »). Vérifiez la configuration du proxy avant de continuer.`);
+              return;
+            }
+
+            numero += CONCURRENCE;
+            if (plateScanState.paused) return;
+            if (!plateScanState.numeroTrouve) await pause(PAUSE_ENTRE_REQUETES_MS);
+          }
+        }
+        if (!plateScanState.numeroTrouve) {
+          setStatus('error', `Immatriculation « ${plateScanState.cible} » non trouvée jusqu’au certificat ${plateScanState.limite}.`);
+          return;
+        }
+        await gererErreursScan();
+        if (plateScanState.paused) return;
+        plateScanState.termine = true;
+        sauverScanImmat();
+        telechargerJsonRecherche(plateScanState.cible, plateScanState.numeroTrouve, plateScanState.lignes);
+        afficherControlesScan();
+        setStatus('success', `Immatriculation trouvée au certificat ${plateScanState.numeroTrouve}. JSON téléchargé automatiquement.`);
+      } finally {
+        plateScanRunning = false;
+        plateScanBtn.disabled = false;
+        afficherControlesScan();
+      }
+    }
+
+    plateScanForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const cible = $('target-plate').value.trim();
+      const limite = parseInt($('plate-max-num').value, 10);
+      if (!normaliserImmatriculation(cible)) { setStatus('error', 'Veuillez saisir une immatriculation.'); return; }
+      if (!Number.isInteger(limite) || limite < 1 || limite > 100000) { setStatus('error', 'La limite doit être comprise entre 1 et 100 000.'); return; }
+
+      resultEl.classList.add('hidden');
+      setStatus('loading', 'Vérification dans le registre Oracle avant de lancer le scan…');
+      const dejaConnu = await verifierDansOracle(cible);
+      if (dejaConnu) {
+        clearStatus();
+        afficherResultatOracle(dejaConnu, cible);
+        return;
+      }
+
+      plateScanState = { cible, limite, lignes: [], numeroTrouve: null, paused: false, termine: false };
+      effacerScanImmat();
+      afficherControlesScan();
+      await lancerRechercheImmatriculation();
+    });
+
+    const scanSauvegarde = chargerScanImmat();
+    if (scanSauvegarde && !scanSauvegarde.termine) {
+      plateScanState = scanSauvegarde;
+      plateScanState.paused = true;
+      afficherControlesScan();
+      setStatus('info', 'Une recherche par immatriculation interrompue est disponible. Cliquez sur Continuer pour la reprendre.');
+    }
+
+    const batchForm = $('batch-form');
+    const batchBtn = $('batch-btn');
+    const batchResultEl = $('batch-result');
+    let tailleLot = 0;
+    let dernierLot = [];
+    let lotDebut = null;
+    let lotFin = null;
+    let extractionEnCours = false;
+    let extractionEnPause = false;
+    let doublonsSupprimes = false;
+
+    function parserLot(lignes) {
+      const c = parserCertificat(lignes);
+      return { nomPrenom: c.proprietaire, immatriculation: c.matricule, departement: c.annexe, chassis: c.chassis };
+    }
+
+    function statutEstOK(ligne) { return String(ligne?.statut || '').trim().toLowerCase() === 'ok'; }
+    function ligneCompleteEtOK(ligne) {
+      return statutEstOK(ligne) && Boolean(ligne.nomPrenom) && Boolean(ligne.immatriculation) && Boolean(ligne.departement) && Boolean(ligne.chassis);
+    }
+    function obtenirNumerosManquants(debut, fin, lignes) {
+      const existants = new Set(lignes.map((l) => Number(l.numero)));
+      const manquants = [];
+      for (let numero = debut; numero <= fin; numero++) if (!existants.has(numero)) manquants.push(numero);
+      return manquants;
+    }
+    function obtenirLignesVidesOuPartielles(lignes) { return lignes.filter((ligne) => !ligneCompleteEtOK(ligne)); }
+    function objectifFinalAtteint(debut, fin, lignes) {
+      return obtenirNumerosManquants(debut, fin, lignes).length === 0 && lignes.length === fin - debut + 1 && lignes.every(ligneCompleteEtOK);
+    }
+    function cleDoublon(ligne) {
+      return [ligne.nomPrenom, ligne.immatriculation, ligne.departement, ligne.chassis]
+        .map((v) => String(v ?? '').trim().toLocaleUpperCase('fr-FR')).join('\u001F');
+    }
+    function obtenirDoublons(lignes) {
+      const groupes = new Map();
+      lignes.forEach((ligne) => {
+        if (!ligneCompleteEtOK(ligne)) return;
+        const cle = cleDoublon(ligne);
+        if (!groupes.has(cle)) groupes.set(cle, []);
+        groupes.get(cle).push(ligne);
+      });
+      return [...groupes.values()].filter((groupe) => groupe.length > 1);
+    }
+    function nombreLignesDoublons(groupes) { return groupes.reduce((total, groupe) => total + groupe.length - 1, 0); }
+
+    function supprimerDoublons() {
+      const groupes = obtenirDoublons(dernierLot);
+      const aSupprimer = new Set(groupes.flatMap((groupe) => groupe.slice(1).map((ligne) => Number(ligne.numero))));
+      dernierLot = dernierLot.filter((ligne) => !aSupprimer.has(Number(ligne.numero)));
+      doublonsSupprimes = true;
+      notificationLot = { type: 'success', message: `${aSupprimer.size} doublon(s) supprimé(s). Une seule ligne a été conservée par groupe.` };
+      sauverProgression(lotDebut, lotFin, dernierLot);
+      renderLot(dernierLot, true);
+    }
+
+    function demanderPause() {
+      if (!extractionEnCours) return;
+      extractionEnPause = true;
+      sauverProgression(lotDebut, lotFin, dernierLot);
+      notificationLot = { type: 'warning', message: 'Extraction mise en pause. Téléchargez l’état actuel ou continuez quand vous le souhaitez.' };
+      renderLot(dernierLot, false);
+      setStatus('info', 'Extraction en pause.');
+    }
+
+    function echapCsv(v) {
+      const s = (v == null ? '' : String(v));
+      return /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+    function nomFichier(debut, fin, ext) { return `Immat-${debut}-${fin}.${ext}`; }
+
+    function exporterCsv(debut, fin, lignes) {
+      const entetes = ['Numéro', 'Nom et prénom', 'Immatriculation', 'Département', 'Châssis', 'Statut'];
+      const corps = lignes.map((l) => [l.numero, l.nomPrenom, l.immatriculation, l.departement, l.chassis, l.statut].map(echapCsv).join(';'));
+      const csv = '\uFEFF' + [entetes.join(';'), ...corps].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = nomFichier(debut, fin, 'csv');
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function supprimerDoublonsPourExport(lignes) {
+      const dejaVues = new Set();
+      return lignes.filter((ligne) => {
+        if (!ligneCompleteEtOK(ligne)) return true;
+        const cle = cleDoublon(ligne);
+        if (dejaVues.has(cle)) return false;
+        dejaVues.add(cle);
+        return true;
+      });
+    }
+
+    function exporterJson(debut, fin, lignes) {
+      const lignesNettoyees = supprimerDoublonsPourExport(Array.isArray(lignes) ? lignes : []);
+      const json = JSON.stringify(lignesNettoyees, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = nomFichier(debut, fin, 'json');
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function exporterProgression(p) {
+      const lignesOk = (Array.isArray(p.lignes) ? p.lignes : []).filter(statutEstOK);
+      if (!lignesOk.length) { setStatus('error', 'Aucune ligne exploitable à télécharger.'); return; }
+      const debut = Number.isInteger(Number(p.debut)) ? Number(p.debut) : lotDebut;
+      const numerosTraites = lignesOk.map((ligne) => Number(ligne.numero)).filter(Number.isInteger);
+      const fin = numerosTraites.length ? Math.max(...numerosTraites) : null;
+      if (!Number.isInteger(debut) || !Number.isInteger(fin)) { setStatus('error', 'Les bornes de l’intervalle sont introuvables.'); return; }
+      exporterJson(debut, fin, lignesOk);
+    }
+
+    const CLE_PROGRESSION = 'oracle_batch_progression';
+    function sauverProgression(debut, fin, lignes) {
+      try { localStorage.setItem(CLE_PROGRESSION, JSON.stringify({ debut, fin, lignes, majLe: Date.now() })); }
+      catch (e) { console.warn('Impossible de sauvegarder la progression :', e); }
+    }
+    function effacerProgression() { localStorage.removeItem(CLE_PROGRESSION); }
+
+    function verifierProgressionEnAttente() {
+      let p;
+      try { p = JSON.parse(localStorage.getItem(CLE_PROGRESSION) || 'null'); } catch (e) { p = null; }
+      if (!p || !Array.isArray(p.lignes) || !p.lignes.length) return false;
+      const numerosManquants = obtenirNumerosManquants(p.debut, p.fin, p.lignes);
+      if (numerosManquants.length === 0) return false;
+
+      const banniere = $('resume-banner');
+      const texte = $('resume-text');
+      extractionEnPause = true;
+      const date = new Date(p.majLe).toLocaleString('fr-FR');
+      texte.textContent = `Une analyse de ${p.debut} à ${p.fin} s'est arrêtée : ${numerosManquants.length} numéro(s) n'ont pas encore été extrait(s) (${date}). Continuer ?`;
+      $('resume-continue').textContent = 'Continuer';
+      $('resume-download').classList.remove('hidden');
+      banniere.classList.remove('hidden');
+      $('resume-continue').onclick = () => {
+        banniere.classList.add('hidden');
+        $('start-num').value = p.debut;
+        $('end-num').value = p.fin;
+        lancerLot(p.debut, p.fin, p.lignes);
+      };
+      $('resume-download').onclick = () => exporterProgression(p);
+      $('resume-discard').onclick = () => { effacerProgression(); banniere.classList.add('hidden'); };
+      return true;
+    }
+
+    const CLE_DERNIER_EXPORT = 'oracle_dernier_export';
+    function sauverDernierExport(debut, fin, lignes) {
+      try { localStorage.setItem(CLE_DERNIER_EXPORT, JSON.stringify({ debut, fin, lignes, termineLe: Date.now() })); }
+      catch (e) { console.warn('Impossible de sauvegarder le dernier export :', e); }
+    }
+
+    function verifierDernierExport() {
+      let d;
+      try { d = JSON.parse(localStorage.getItem(CLE_DERNIER_EXPORT) || 'null'); } catch (e) { d = null; }
+      if (!d || !Array.isArray(d.lignes) || !d.lignes.length) return;
+      lotDebut = d.debut; lotFin = d.fin; tailleLot = d.fin - d.debut + 1; dernierLot = d.lignes;
+      renderLot(dernierLot, true);
+      const banniere = $('resume-banner');
+      const texte = $('resume-text');
+      const date = new Date(d.termineLe).toLocaleString('fr-FR');
+      texte.textContent = `Dernier export disponible : ${d.debut}-${d.fin} (${d.lignes.length} certificats, généré le ${date}). Le fichier a-t-il bien été téléchargé ?`;
+      $('resume-continue').textContent = 'Retélécharger';
+      $('resume-download').classList.add('hidden');
+      banniere.classList.remove('hidden');
+      $('resume-continue').onclick = () => { exporterJson(d.debut, d.fin, d.lignes); banniere.classList.add('hidden'); };
+      $('resume-download').onclick = () => exporterProgression(d);
+      $('resume-discard').onclick = () => { localStorage.removeItem(CLE_DERNIER_EXPORT); banniere.classList.add('hidden'); };
+    }
+
+    let notificationLot = null;
+    function notificationHtml() {
+      if (!notificationLot) return '';
+      const styles = {
+        success: ['border-emerald-200 bg-emerald-50 text-emerald-800', 'check-circle-2', 'text-emerald-600'],
+        error: ['border-red-200 bg-red-50 text-red-800', 'alert-triangle', 'text-red-600'],
+        warning: ['border-amber-200 bg-amber-50 text-amber-800', 'alert-circle', 'text-amber-600']
+      };
+      const s = styles[notificationLot.type] || styles.warning;
+      return `<div class="mx-4 mt-4 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${s[0]}">
+        <i data-lucide="${s[1]}" class="mt-0.5 h-5 w-5 shrink-0 ${s[2]}"></i>
+        <p class="font-semibold">${notificationLot.message}</p>
+      </div>`;
+    }
+
+    function renderLot(lignes, termine) {
+      const numerosManquants = obtenirNumerosManquants(lotDebut, lotFin, lignes);
+      const lignesVides = obtenirLignesVidesOuPartielles(lignes);
+      const doublons = obtenirDoublons(lignes);
+      const detailDoublons = doublons.map((groupe) => `lignes ${groupe.map((ligne) => ligne.numero).join(', ')} (${groupe.length} occurrences)`).join(' · ');
+      const objectif = objectifFinalAtteint(lotDebut, lotFin, lignes);
+      const exportAutorise = termine && (objectif || (doublonsSupprimes && !lignesVides.length && !doublons.length));
+      const pause2 = extractionEnPause;
+
+      batchResultEl.innerHTML = `
+        <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-6 py-4">
+            <div class="flex items-center gap-2">
+              <i data-lucide="table" class="h-5 w-5 text-slate-600"></i>
+              <div>
+                <h3 class="text-sm font-semibold text-slate-800">Analyse de l’intervalle (${lignes.length}/${tailleLot})</h3>
+                <p class="mt-0.5 text-xs text-slate-500">${lignes.filter(ligneCompleteEtOK).length} ligne(s) OK — ${numerosManquants.length} absente(s) — ${lignesVides.length} à corriger${doublons.length ? ` — ${doublons.length} groupe(s) en doublon` : ''}</p>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              ${extractionEnCours && !pause2 ? `<button id="pause-lot" class="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"><i data-lucide="pause" class="h-4 w-4"></i> Pause</button>` : ''}
+              ${pause2 || numerosManquants.length ? `<button id="continuer-lot" class="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700"><i data-lucide="play" class="h-4 w-4"></i> Continuer${numerosManquants.length ? ` (${numerosManquants.length})` : ''}</button>` : ''}
+              ${(pause2 || (lignesVides.length && numerosManquants.length === 0)) ? `<button id="gerer-lignes-vides" class="inline-flex items-center gap-2 rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-700"><i data-lucide="rotate-cw" class="h-4 w-4"></i> Gérer les lignes vides (${lignesVides.length})</button>` : ''}
+              ${pause2 ? `<button id="download-progress" class="inline-flex items-center gap-2 rounded-lg border border-amber-600 px-4 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-50"><i data-lucide="download" class="h-4 w-4"></i> Télécharger l’état actuel</button>` : ''}
+              ${(pause2 || (termine && objectif)) && doublons.length ? `<button id="supprimer-doublons" class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700"><i data-lucide="trash-2" class="h-4 w-4"></i> Supprimer les doublons (${nombreLignesDoublons(doublons)})</button>` : ''}
+              ${exportAutorise ? `<button id="export-csv" class="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-800"><i data-lucide="download" class="h-4 w-4"></i> CSV</button><button id="export-json" class="inline-flex items-center gap-2 rounded-lg border border-brand-700 px-4 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-50"><i data-lucide="download" class="h-4 w-4"></i> JSON</button>` : ''}
+            </div>
+          </div>
+          ${notificationHtml()}
+          ${doublons.length ? `<details class="group mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 [&_summary::-webkit-details-marker]:hidden">
+            <summary class="flex cursor-pointer items-center justify-between gap-3 font-semibold focus:outline-none">
+              <span>Doublons détectés : ${doublons.length} groupe(s)</span>
+              <span class="relative size-5 shrink-0 transition duration-300 group-open:-rotate-180">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+              </span>
+            </summary>
+            <p class="mt-3 leading-relaxed">${detailDoublons}</p>
+          </details>` : ''}
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-white text-xs uppercase tracking-wide text-slate-400"><tr><th class="px-4 py-2 font-medium">N°</th><th class="px-4 py-2 font-medium">Nom et prénom</th><th class="px-4 py-2 font-medium">Immatriculation</th><th class="px-4 py-2 font-medium">Département</th><th class="px-4 py-2 font-medium">Châssis</th><th class="px-4 py-2 font-medium">Statut</th></tr></thead>
+              <tbody class="divide-y divide-slate-100 font-mono text-xs">
+                ${lignes.map((l) => `<tr class="${statutEstOK(l) ? '' : 'bg-red-50/40'}"><td class="px-4 py-2.5 text-slate-500">${l.numero}</td><td class="px-4 py-2.5 ${l.nomPrenom ? 'text-slate-900' : 'text-slate-300'}">${l.nomPrenom || '—'}</td><td class="px-4 py-2.5 ${l.immatriculation ? 'text-slate-900' : 'text-slate-300'}">${l.immatriculation || '—'}</td><td class="px-4 py-2.5 ${l.departement ? 'text-slate-900' : 'text-slate-300'}">${l.departement || '—'}</td><td class="px-4 py-2.5 ${l.chassis ? 'text-slate-900' : 'text-slate-300'}">${l.chassis || '—'}</td><td class="px-4 py-2.5"><span title="${l.apercu ? l.apercu.replace(/"/g, '&quot;') : ''}" class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${statutEstOK(l) ? 'bg-brand-50 text-brand-700' : 'bg-red-100 text-red-700'}">${l.statut || 'Erreur'}</span></td></tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+      batchResultEl.classList.remove('hidden');
+      lucide.createIcons();
+
+      const pauseBtn = $('pause-lot');
+      if (pauseBtn) pauseBtn.addEventListener('click', demanderPause);
+      const continuer = $('continuer-lot');
+      if (continuer) continuer.addEventListener('click', () => lancerLot(lotDebut, lotFin, dernierLot));
+      const gerer = $('gerer-lignes-vides');
+      if (gerer) gerer.addEventListener('click', () => { extractionEnPause = false; gererLignesVides(lotDebut, lotFin); });
+      const dlProgress = $('download-progress');
+      if (dlProgress) dlProgress.addEventListener('click', () => exporterProgression({ debut: lotDebut, fin: lotFin, lignes: dernierLot }));
+      const supDoublons = $('supprimer-doublons');
+      if (supDoublons) supDoublons.addEventListener('click', supprimerDoublons);
+      const exp = $('export-csv');
+      if (exp) exp.addEventListener('click', () => exporterCsv(lotDebut, lotFin, dernierLot));
+      const expJson = $('export-json');
+      if (expJson) expJson.addEventListener('click', () => exporterJson(lotDebut, lotFin, dernierLot));
+    }
+
+    async function reextraireLigne(ligneExistante) {
+      const numero = Number(ligneExistante.numero);
+      try {
+        const buffer = await recupererPdf(numero);
+        const lignesPdf = await extraireTextePdf(buffer);
+        const champs = parserLot(lignesPdf);
+        const complete = Boolean(champs.nomPrenom) && Boolean(champs.immatriculation) && Boolean(champs.departement) && Boolean(champs.chassis);
+        return { numero, ...champs, statut: complete ? 'OK' : 'Vide' };
+      } catch (erreur) {
+        return { ...ligneExistante, statut: 'Erreur', erreur: erreur.message };
+      }
+    }
+
+    function finaliserLot(debut, fin, corrigees = 0, tentatives = 0) {
+      if (!objectifFinalAtteint(debut, fin, dernierLot)) return false;
+      extractionEnCours = false;
+      extractionEnPause = false;
+      const message = corrigees > 0
+        ? `Objectif atteint : ${corrigees} ligne(s) corrigée(s) automatiquement après ${tentatives} tentative(s).`
+        : 'Objectif atteint : toutes les lignes ont été extraites correctement.';
+      notificationLot = { type: 'success', message };
+      renderLot(dernierLot, true);
+      setStatus('success', message);
+      effacerProgression();
+      sauverDernierExport(debut, fin, dernierLot);
+      exporterJson(debut, fin, dernierLot);
+      return true;
+    }
+
+    async function gererLignesVides(debut, fin) {
+      extractionEnCours = true;
+      let tentatives = 0;
+      let corrigees = 0;
+      let aCorriger = obtenirLignesVidesOuPartielles(dernierLot);
+      while (aCorriger.length && tentatives < 4) {
+        tentatives++;
+        setStatus('loading', `Correction des lignes vides : tentative ${tentatives}/4 — ${aCorriger.length} ligne(s)…`);
+        for (const ancienne of aCorriger) {
+          const numero = Number(ancienne.numero);
+          const avant = ligneCompleteEtOK(ancienne);
+          setStatus('loading', `Nouvelle extraction de la ligne ${numero} (tentative ${tentatives}/4)…`);
+          const nouvelle = await reextraireLigne(ancienne);
+          const index = dernierLot.findIndex((l) => Number(l.numero) === numero);
+          if (index !== -1) { dernierLot[index] = nouvelle; if (!avant && ligneCompleteEtOK(nouvelle)) corrigees++; }
+          renderLot(dernierLot, false);
+          sauverProgression(debut, fin, dernierLot);
+        }
+        aCorriger = obtenirLignesVidesOuPartielles(dernierLot);
+      }
+      if (aCorriger.length === 0) {
+        finaliserLot(debut, fin, corrigees, tentatives);
+      } else {
+        notificationLot = { type: 'warning', message: `${aCorriger.length} ligne(s) restent vides ou partielles après ${tentatives} tentative(s).` };
+        renderLot(dernierLot, false);
+        setStatus('error', notificationLot.message);
+      }
+    }
+
+    async function lancerLot(debut, fin, dejaFaites) {
+      batchBtn.disabled = true;
+      extractionEnCours = true;
+      extractionEnPause = false;
+      lotDebut = debut; lotFin = fin; tailleLot = fin - debut + 1;
+      dernierLot = Array.isArray(dejaFaites) ? dejaFaites.slice() : [];
+      notificationLot = null;
+      renderLot(dernierLot, false);
+
+      // Traite chaque lot de certificats (par groupes de CONCURRENCE, en
+      // parallèle) — extraction CÔTÉ SERVEUR désormais (voir
+      // extraireLigneServeur), plus de téléchargement ni de parsing PDF
+      // dans le navigateur pour ce flux.
+      async function traiterUnCertificat(numero) {
+        try {
+          return await extraireLigneServeur(numero);
+        } catch (erreur) {
+          return { numero, nomPrenom: null, immatriculation: null, departement: null, chassis: null, statut: 'Erreur', erreur: erreur.message };
+        }
+      }
+
+      try {
+        const manquants = obtenirNumerosManquants(debut, fin, dernierLot);
+        for (let i = 0; i < manquants.length; i += CONCURRENCE) {
+          const chunk = manquants.slice(i, i + CONCURRENCE);
+          setStatus('loading', `Analyse des certificats ${chunk[0]}–${chunk[chunk.length - 1]} (${i + chunk.length}/${manquants.length})…`);
+
+          const resultats = await Promise.all(chunk.map(traiterUnCertificat));
+          for (const ligne of resultats) dernierLot.push(ligne);
+          dernierLot.sort((a, b) => Number(a.numero) - Number(b.numero));
+          sauverProgression(debut, fin, dernierLot);
+
+          const echecSysteme = detecterEchecSysteme(dernierLot.slice(-SEUIL_COUPE_CIRCUIT));
+          if (echecSysteme) {
+            extractionEnPause = true;
+            notificationLot = { type: 'error', message: `Arrêt automatique : les ${SEUIL_COUPE_CIRCUIT} derniers certificats ont tous échoué avec la même erreur (« ${echecSysteme} »). Vérifiez la configuration du proxy avant de continuer.` };
+            renderLot(dernierLot, false);
+            setStatus('error', notificationLot.message);
+            return;
+          }
+
+          if (extractionEnPause) break;
+          renderLot(dernierLot, false);
+          await pause(PAUSE_ENTRE_REQUETES_MS);
+        }
+
+        if (extractionEnPause) { renderLot(dernierLot, false); return; }
+        const vides = obtenirLignesVidesOuPartielles(dernierLot);
+        if (vides.length) await gererLignesVides(debut, fin);
+        else finaliserLot(debut, fin);
+      } finally {
+        batchBtn.disabled = false;
+        if (!extractionEnPause && !objectifFinalAtteint(debut, fin, dernierLot)) extractionEnCours = false;
+      }
+    }
+
+    batchForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const debut = parseInt($('start-num').value, 10);
+      const fin = parseInt($('end-num').value, 10);
+      resultEl.classList.add('hidden');
+      batchResultEl.classList.add('hidden');
+      $('resume-banner').classList.add('hidden');
+      if (!Number.isInteger(debut) || debut < 1 || !Number.isInteger(fin) || fin < 1) { setStatus('error', 'Veuillez saisir un début et une fin valides.'); return; }
+      if (fin < debut) { setStatus('error', 'La fin doit être supérieure ou égale au début.'); return; }
+      await lancerLot(debut, fin, []);
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const vin = $('vin').value.trim().toUpperCase();
+      resultEl.classList.add('hidden');
+      if (!vin) { setStatus('error', 'Veuillez saisir un numéro de châssis.'); return; }
+      btn.disabled = true;
+      setStatus('loading', 'Interrogation de la base ANaTT…');
+      try {
+        const { data, found } = await verifierChassis(vin);
+        if (!found) setStatus('info', `Aucune information trouvée pour le VIN « ${vin} ».`);
+        else { clearStatus(); renderResult(data); }
+      } catch (err) {
+        setStatus('error', err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    lucide.createIcons();
+    if (!verifierProgressionEnAttente()) verifierDernierExport();
+  </script>
+</body>
+</html>

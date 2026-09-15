@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>MotoScan BJ — Enregistrer une moto volée</title>
+<meta name="robots" content="noindex,nofollow" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Manrope', 'ui-sans-serif', 'system-ui'],
+          display: ['"Space Grotesk"', 'ui-sans-serif', 'system-ui'],
+        },
+        colors: {
+          ink: '#10151f',
+          paper: '#f5f6f8',
+          brand: {
+            50: '#eef4fc', 100: '#dbe7f8', 300: '#8ab0e0', 400: '#5688c9',
+            500: '#33629f', 600: '#1d4d91', 700: '#163c72', 800: '#122f5a', 900: '#0b2247',
+          },
+          gold: { 300: '#f6cc5f', 400: '#f0b429', 500: '#dc9e17', 600: '#b9820f' },
+        },
+      },
+    },
+  };
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
+  rel="stylesheet"
+/>
+</head>
+<body class="min-h-screen bg-paper font-sans text-ink antialiased">
+
+  <!-- Bandeau supérieur : identité + repère de contexte, volontairement
+       compact — l'agent qui ouvre cette page est déjà en train d'agir,
+       pas en train de découvrir un produit. -->
+  <header class="border-b border-ink/[0.06] bg-white">
+    <div class="mx-auto flex max-w-3xl items-center justify-between px-5 py-4">
+      <div class="flex items-center gap-2.5">
+        <span class="grid h-9 w-9 place-items-center rounded-lg bg-brand-900 text-gold-400">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/>
+            <path d="M15 6a1 1 0 0 0-1 1v4l4 4"/><path d="M9 17.5H12l2-6h3"/><path d="M9 17.5 12 10l-3-3H6"/>
+          </svg>
+        </span>
+        <div>
+          <b class="block font-display text-[15px] font-semibold leading-none">MotoScan <span class="text-brand-600">BJ</span></b>
+          <span class="mt-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-ink/40">Registre national des vols de motos</span>
+        </div>
+      </div>
+      <span class="hidden items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-[10px] font-bold text-brand-700 sm:flex">
+        <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> Connecté au registre Oracle
+      </span>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-3xl px-5 py-8">
+
+    <!-- Cadrage court : pourquoi ce formulaire compte, pas une vitrine. -->
+    <div class="mb-6">
+      <p class="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-600">Nouvelle déclaration</p>
+      <h1 class="mt-2 font-display text-[28px] font-semibold leading-tight sm:text-3xl">
+        Un dossier complet et exact augmente les chances de retrouver la moto.
+      </h1>
+      <p class="mt-2 max-w-xl text-[13px] leading-relaxed text-ink/55">
+        Si la plaque ou le châssis est déjà connu du registre Oracle, les champs correspondants se
+        complètent automatiquement — vérifiez-les avant de continuer.
+      </p>
+    </div>
+
+    <!-- ENREGISTREMENT MOTO -->
+    <section id="section-enreg-moto">
+      <div class="overflow-hidden rounded-2xl border border-ink/[0.06] bg-white shadow-[0_1px_2px_rgba(16,21,31,0.04),0_12px_28px_-12px_rgba(16,21,31,0.12)]">
+
+        <div class="flex items-center justify-between border-b border-ink/[0.06] bg-white px-6 pb-4 pt-5">
+          <div>
+            <h3 class="font-display text-base font-semibold">Enregistrement moto</h3>
+            <div class="mt-1.5 flex items-center gap-1.5">
+              <span id="moto-dot-1" class="h-2 w-2 rounded-full bg-brand-600 transition-all"></span>
+              <span id="moto-dot-2" class="h-2 w-2 rounded-full bg-ink/15 transition-all"></span>
+              <span id="moto-dot-3" class="h-2 w-2 rounded-full bg-ink/15 transition-all"></span>
+              <span id="moto-step-label" class="ml-1 text-[11px] text-ink/45">Étape 1 / 3</span>
+            </div>
+          </div>
+        </div>
+
+        <form id="motoForm" onsubmit="submitMotoForm(event)" class="flex-1" novalidate>
+
+          <!-- ÉTAPE 1 — Déclarant & propriétaire -->
+          <div id="moto-step1" class="space-y-4 px-6 py-5">
+            <p class="text-xs font-semibold uppercase tracking-wider text-brand-600">Déclarant &amp; propriétaire</p>
+
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">N° main courante</label>
+              <input type="text" name="nummc" id="nummc"
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Déclarant</label>
+              <input type="text" name="declarant" id="declarant" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Propriétaire</label>
+              <input type="text" name="proprietaire" id="proprietaire" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+              <p id="proprietaire-hint" class="mt-1.5 hidden text-[10px] font-semibold text-brand-600"></p>
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Téléphone</label>
+              <input type="tel" name="telephone_proprietaire" id="telephone_proprietaire" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Tél. secondaire</label>
+              <input type="tel" name="telephone_secondaire" id="telephone_secondaire"
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+
+            <button type="button" onclick="motoNextStep(2)"
+              class="btn-haptic flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3.5 text-sm font-semibold text-white shadow-md shadow-brand-600/20 transition hover:bg-brand-700">
+              Suivant <span aria-hidden="true">→</span>
+            </button>
+          </div>
+
+          <!-- ÉTAPE 2 — Informations de la moto -->
+          <div id="moto-step2" class="hidden space-y-4 px-6 py-5">
+            <p class="text-xs font-semibold uppercase tracking-wider text-brand-600">Informations de la moto</p>
+
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Châssis</label>
+              <div class="relative">
+                <input type="text" name="numero_chassis" id="numero_chassis" required autocomplete="off"
+                  class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 pr-10 text-sm uppercase tracking-wide outline-none placeholder:normal-case focus:ring-2 focus:ring-brand-500">
+                <span id="chassis-spinner" class="absolute right-3.5 top-1/2 hidden -translate-y-1/2"><svg class="h-4 w-4 animate-spin text-brand-500" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg></span>
+              </div>
+              <p id="chassis-hint" class="mt-1.5 hidden text-[10px] font-semibold"></p>
+            </div>
+
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Plaque</label>
+              <div class="relative">
+                <input type="text" name="plaque_immatriculation" id="plaque_immatriculation" required autocomplete="off"
+                  class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 pr-10 text-sm uppercase tracking-wide outline-none placeholder:normal-case focus:ring-2 focus:ring-brand-500"
+                  placeholder="Ex. 2CR0770RB">
+                <span id="plaque-spinner" class="absolute right-3.5 top-1/2 hidden -translate-y-1/2"><svg class="h-4 w-4 animate-spin text-brand-500" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg></span>
+              </div>
+              <p id="plaque-hint" class="mt-1.5 hidden text-[10px] font-semibold"></p>
+            </div>
+
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Marque</label>
+              <input type="text" name="marque" id="marque" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Modèle</label>
+              <input type="text" name="modele" id="modele" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Couleur</label>
+              <input type="text" name="couleur" id="couleur" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Circonstance du vol</label>
+              <input type="text" name="circonstance_du_vol" id="circonstance_du_vol" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Autres objets</label>
+              <input type="text" name="autresobjets" id="autresobjets" placeholder="Néant si aucun"
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Lieu du vol</label>
+              <input type="text" name="lieu_du_vol" id="lieu_du_vol" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Unité de plainte</label>
+              <div class="relative">
+                <input type="text" id="unite_de_plainte_search" autocomplete="off" placeholder="Rechercher un commissariat ou une brigade…"
+                  class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+                <div id="unite_de_plainte_list" class="absolute inset-x-0 top-full z-10 mt-1.5 hidden max-h-52 overflow-y-auto rounded-xl border border-ink/10 bg-white py-1.5 shadow-lg"></div>
+              </div>
+              <input type="hidden" name="unite_de_plainte" id="unite_de_plainte" required>
+              <p class="mt-1.5 text-[10px] text-ink/40">Liste d'exemple — à remplacer par le répertoire réel des unités.</p>
+            </div>
+
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Tél. unité de plainte</label>
+              <input type="text" name="telephone_unite_de_plainte" id="telephone_unite_de_plainte" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Agent enregistreur</label>
+              <input type="text" name="agent_enregistreur" id="agent_enregistreur"
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+
+            <div class="flex gap-3 pt-2">
+              <button type="button" onclick="motoNextStep(1)"
+                class="btn-haptic flex-1 rounded-xl bg-ink/5 py-3 text-sm font-semibold text-ink/70 transition hover:bg-ink/10">
+                <span aria-hidden="true">←</span> Précédent
+              </button>
+              <button type="button" onclick="motoNextStep(3)"
+                class="btn-haptic flex-1 rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white transition hover:bg-brand-700">
+                Suivant <span aria-hidden="true">→</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- ÉTAPE 3 — Déclaration & statut -->
+          <div id="moto-step3" class="hidden space-y-4 px-6 py-5">
+            <p class="text-xs font-semibold uppercase tracking-wider text-brand-600">Déclaration &amp; statut</p>
+
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Date du vol</label>
+              <input type="date" name="date_vol" id="date_vol" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Date déclaration</label>
+              <input type="date" name="date_declaration" id="date_declaration" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-ink/60">Statut</label>
+              <select name="status" id="status" required
+                class="w-full rounded-xl border border-ink/10 bg-white px-3.5 py-3 text-sm text-ink outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="volé">Volé</option>
+                <option value="retrouvée">Retrouvé</option>
+                <option value="interpelée">Interpelée</option>
+              </select>
+            </div>
+
+            <!-- Récapitulatif — l'agent revoit d'un coup d'œil ce qui a
+                 été auto-complété avant d'envoyer le dossier. -->
+            <div id="recap-box" class="hidden rounded-xl border border-brand-100 bg-brand-50 p-4 text-[12px] leading-relaxed text-brand-800"></div>
+
+            <div class="flex gap-3 pt-2">
+              <button type="button" onclick="motoNextStep(2)"
+                class="btn-haptic flex-1 rounded-xl bg-ink/5 py-3 text-sm font-semibold text-ink/70 transition hover:bg-ink/10">
+                <span aria-hidden="true">←</span> Précédent
+              </button>
+              <button type="submit"
+                class="btn-haptic flex flex-1 items-center justify-center gap-2 rounded-xl bg-gold-400 py-3 text-sm font-semibold text-brand-900 shadow-md shadow-gold-400/30 transition hover:bg-gold-500">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 6L9 17l-5-5"/>
+                </svg>
+                Enregistrer
+              </button>
+            </div>
+          </div>
+
+        </form>
+      </div>
+
+      <p class="mt-4 text-center text-[11px] text-ink/35">
+        Les champs marqués auto-complétés proviennent du registre Oracle — vérifiez-les avant validation.
+      </p>
+    </section>
+  </main>
+
+<script>
+(() => {
+  'use strict';
+
+  // ================================================================
+  // Assistant tactile léger — un déclic visuel au tap, pour un usage
+  // mobile sur le terrain.
+  // ================================================================
+  document.querySelectorAll('.btn-haptic').forEach(btn => {
+    btn.addEventListener('pointerdown', () => btn.classList.add('scale-[0.98]'));
+    ['pointerup', 'pointerleave'].forEach(evt => btn.addEventListener(evt, () => btn.classList.remove('scale-[0.98]')));
+  });
+  document.querySelectorAll('.btn-haptic').forEach(btn => btn.classList.add('transition-transform'));
+
+  // ================================================================
+  // Assistant multi-étapes
+  // ================================================================
+  const TOTAL_STEPS = 3;
+  let currentStep = 1;
+
+  function requiredFieldsValid(stepEl) {
+    const fields = [...stepEl.querySelectorAll('[required]')];
+    let firstInvalid = null;
+    const ok = fields.every(f => {
+      const valid = f.value.trim() !== '';
+      if (!valid && !firstInvalid) firstInvalid = f;
+      return valid;
+    });
+    if (firstInvalid) firstInvalid.focus();
+    return ok;
+  }
+
+  window.motoNextStep = function motoNextStep(step) {
+    const goingForward = step > currentStep;
+    if (goingForward) {
+      const currentEl = document.getElementById(`moto-step${currentStep}`);
+      if (!requiredFieldsValid(currentEl)) return;
+    }
+    for (let i = 1; i <= TOTAL_STEPS; i++) {
+      document.getElementById(`moto-step${i}`).classList.toggle('hidden', i !== step);
+      const dot = document.getElementById(`moto-dot-${i}`);
+      dot.classList.toggle('bg-brand-600', i <= step);
+      dot.classList.toggle('bg-ink/15', i > step);
+    }
+    document.getElementById('moto-step-label').textContent = `Étape ${step} / ${TOTAL_STEPS}`;
+    currentStep = step;
+    if (step === 3) buildRecap();
+    window.scrollTo({ top: document.getElementById('section-enreg-moto').offsetTop - 16, behavior: 'smooth' });
+  };
+
+  function buildRecap() {
+    const box = document.getElementById('recap-box');
+    if (!autoFilled.proprietaire && !autoFilled.chassis && !autoFilled.plaque) { box.classList.add('hidden'); return; }
+    const lines = [];
+    if (autoFilled.proprietaire) lines.push('le propriétaire');
+    if (autoFilled.chassis) lines.push('le châssis');
+    if (autoFilled.plaque) lines.push('la plaque');
+    box.textContent = `Complété automatiquement depuis le registre Oracle : ${lines.join(', ')}. Vérifiez ces valeurs avant d'enregistrer.`;
+    box.classList.remove('hidden');
+  }
+
+  // ================================================================
+  // Recherche Oracle — dès qu'une plaque ou un châssis complet est
+  // saisi, on vérifie s'il est déjà connu du registre pour compléter
+  // propriétaire + l'autre identifiant. Appelle un point d'entrée sur
+  // VOTRE PROPRE serveur (jamais l'API Oracle directement depuis le
+  // navigateur : la clé ne doit jamais être exposée côté client — voir
+  // oracle-lookup.php fourni à côté de cette page).
+  // ================================================================
+  const LOOKUP_ENDPOINT = '/api/oracle-lookup.php';
+  const autoFilled = { proprietaire: false, chassis: false, plaque: false };
+
+  function normalizePlate(raw) {
+    const stripped = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const m = stripped.match(/^([0-9]?[A-Z]{2}[0-9]{4})(RB)?$/);
+    return m ? m[1] + 'RB' : null;
+  }
+  function isCompleteChassis(raw) {
+    return /^[A-Z0-9]{15,17}$/.test(String(raw || '').toUpperCase().replace(/\s/g, ''));
+  }
+
+  function debounce(fn, ms) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  }
+
+  function setHint(el, text, tone) {
+    el.textContent = text;
+    el.classList.remove('hidden', 'text-brand-600', 'text-ink/40', 'text-red-600');
+    el.classList.add(tone === 'found' ? 'text-brand-600' : tone === 'none' ? 'text-ink/40' : 'text-red-600');
+  }
+
+  async function runLookup({ type, value, spinnerEl, hintEl, counterpartInput, counterpartKey }) {
+    spinnerEl.classList.remove('hidden');
+    let res;
+    try {
+      res = await fetch(`${LOOKUP_ENDPOINT}?type=${type}&value=${encodeURIComponent(value)}`);
+    } catch (networkErr) {
+      // Le fetch lui-même a échoué avant toute réponse — hors ligne, ou
+      // oracle-lookup.php totalement injoignable (mauvais chemin, DNS...).
+      setHint(hintEl, `Appel impossible : ${networkErr.message}`, 'error');
+      spinnerEl.classList.add('hidden');
+      return;
+    }
+
+    let data = null;
+    let parseFailed = false;
+    try { data = await res.json(); } catch (_) { parseFailed = true; }
+
+    if (!res.ok) {
+      // On affiche le VRAI message renvoyé par oracle-lookup.php (qui
+      // relaie tel quel l'erreur d'Oracle : clé invalide, IP non
+      // autorisée, limite atteinte...) plutôt qu'un texte générique —
+      // sans ça, impossible de savoir si le problème vient de la clé,
+      // du déploiement du proxy, ou d'autre chose.
+      const detail = data?.error || (parseFailed ? `réponse illisible (HTTP ${res.status})` : `HTTP ${res.status}`);
+      setHint(hintEl, `Vérification impossible : ${detail}`, 'error');
+      spinnerEl.classList.add('hidden');
+      return;
+    }
+    if (parseFailed || !data) {
+      setHint(hintEl, 'Réponse du proxy illisible — vérifiez oracle-lookup.php.', 'error');
+      spinnerEl.classList.add('hidden');
+      return;
+    }
+
+    try {
+      if (data.found && data.vehicle) {
+        const proprietaireInput = document.getElementById('proprietaire');
+        if (data.vehicle.owner && !proprietaireInput.value.trim()) {
+          proprietaireInput.value = data.vehicle.owner;
+          autoFilled.proprietaire = true;
+          const ph = document.getElementById('proprietaire-hint');
+          ph.textContent = 'Complété depuis le registre Oracle.';
+          ph.classList.remove('hidden');
+        }
+        if (data.vehicle[counterpartKey] && !counterpartInput.value.trim()) {
+          counterpartInput.value = data.vehicle[counterpartKey];
+          autoFilled[counterpartKey === 'vin' ? 'chassis' : 'plaque'] = true;
+        }
+        setHint(hintEl, 'Correspondance trouvée dans le registre Oracle.', 'found');
+      } else {
+        setHint(hintEl, 'Aucune correspondance dans le registre Oracle — saisie manuelle.', 'none');
+      }
+    } finally {
+      spinnerEl.classList.add('hidden');
+    }
+  }
+
+  const plaqueInput = document.getElementById('plaque_immatriculation');
+  const chassisInput = document.getElementById('numero_chassis');
+
+  const checkPlaque = debounce(() => {
+    const normalized = normalizePlate(plaqueInput.value);
+    if (!normalized) return;
+    runLookup({
+      type: 'plate', value: normalized,
+      spinnerEl: document.getElementById('plaque-spinner'),
+      hintEl: document.getElementById('plaque-hint'),
+      counterpartInput: chassisInput, counterpartKey: 'vin',
+    });
+  }, 500);
+
+  const checkChassis = debounce(() => {
+    const raw = chassisInput.value.trim();
+    if (!isCompleteChassis(raw)) return;
+    runLookup({
+      type: 'vin', value: raw.toUpperCase(),
+      spinnerEl: document.getElementById('chassis-spinner'),
+      hintEl: document.getElementById('chassis-hint'),
+      counterpartInput: plaqueInput, counterpartKey: 'plate',
+    });
+  }, 500);
+
+  plaqueInput.addEventListener('input', () => { plaqueInput.value = plaqueInput.value.toUpperCase(); checkPlaque(); });
+  chassisInput.addEventListener('input', () => { chassisInput.value = chassisInput.value.toUpperCase().replace(/\s/g, '').slice(0, 17); checkChassis(); });
+
+  // ================================================================
+  // Unité de plainte — combobox filtrable. Liste d'exemple à remplacer
+  // par le répertoire réel des commissariats/brigades.
+  // ================================================================
+  const SAMPLE_UNITS = [
+    'Commissariat central de Cotonou', 'Commissariat de Cadjèhoun', 'Commissariat de Akpakpa',
+    'Brigade de gendarmerie de Calavi', 'Commissariat de Porto-Novo', 'Brigade de gendarmerie de Sèmè-Kpodji',
+    'Commissariat de Parakou', 'Brigade de gendarmerie de Abomey-Calavi',
+  ];
+  const unitSearch = document.getElementById('unite_de_plainte_search');
+  const unitList = document.getElementById('unite_de_plainte_list');
+  const unitHidden = document.getElementById('unite_de_plainte');
+
+  function renderUnitOptions(query) {
+    const q = query.trim().toLowerCase();
+    const matches = q ? SAMPLE_UNITS.filter(u => u.toLowerCase().includes(q)) : SAMPLE_UNITS;
+    unitList.innerHTML = matches.length
+      ? matches.map(u => `<button type="button" data-unit="${u}" class="block w-full px-3.5 py-2.5 text-left text-[13px] hover:bg-brand-50">${u}</button>`).join('')
+      : '<p class="px-3.5 py-2.5 text-[12px] text-ink/40">Aucune unité correspondante.</p>';
+    unitList.querySelectorAll('[data-unit]').forEach(btn => {
+      btn.onclick = () => {
+        unitSearch.value = btn.dataset.unit;
+        unitHidden.value = btn.dataset.unit;
+        unitList.classList.add('hidden');
+      };
+    });
+  }
+  unitSearch.addEventListener('focus', () => { renderUnitOptions(unitSearch.value); unitList.classList.remove('hidden'); });
+  unitSearch.addEventListener('input', () => { unitHidden.value = ''; renderUnitOptions(unitSearch.value); unitList.classList.remove('hidden'); });
+  document.addEventListener('click', e => { if (!unitSearch.contains(e.target) && !unitList.contains(e.target)) unitList.classList.add('hidden'); });
+
+  // ================================================================
+  // Soumission — à brancher sur votre endpoint d'enregistrement réel.
+  // ================================================================
+  window.submitMotoForm = function submitMotoForm(e) {
+    e.preventDefault();
+    const stepEl = document.getElementById('moto-step3');
+    if (!requiredFieldsValid(stepEl)) return;
+    if (!unitHidden.value) { unitSearch.focus(); return; }
+
+    const data = Object.fromEntries(new FormData(e.target).entries());
+    console.log('Dossier moto prêt à envoyer :', data);
+    // TODO : POST vers votre endpoint d'enregistrement réel.
+  };
+})();
+</script>
+</body>
+</html>
