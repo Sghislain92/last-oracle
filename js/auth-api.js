@@ -34,26 +34,45 @@
         localStorage.removeItem(SESSION_KEY);
     }
 
-    async function apiCall(path, { method = 'GET', body, auth = false } = {}) {
+    async function apiCall(path, { method = 'GET', body, auth = false, timeoutMs = 0 } = {}) {
         const headers = { 'Content-Type': 'application/json' };
         if (auth) {
             const session = getStoredSession();
             if (session && session.token) headers['Authorization'] = 'Bearer ' + session.token;
         }
         let resp;
+        const controller = timeoutMs > 0 && typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
         try {
             resp = await fetch(path, {
                 method,
                 headers,
-                body: body ? JSON.stringify(body) : undefined
+                body: body ? JSON.stringify(body) : undefined,
+                signal: controller ? controller.signal : undefined
             });
         } catch (networkErr) {
-            const err = new Error('Connexion au serveur impossible. Vérifiez votre connexion.');
+            const timedOut = networkErr && networkErr.name === 'AbortError';
+            const err = new Error(timedOut
+                ? 'Le serveur n’a pas répondu dans le délai prévu.'
+                : 'Connexion au serveur impossible. Vérifiez votre connexion.');
+            err.isTimeout = timedOut;
             err.cause = networkErr;
             throw err;
         }
         let payload = null;
-        try { payload = await resp.json(); } catch (e) { /* réponse vide */ }
+        try {
+            payload = await resp.json();
+        } catch (e) {
+            if (e && e.name === 'AbortError') {
+                const timeoutError = new Error('Le serveur n’a pas répondu dans le délai prévu.');
+                timeoutError.isTimeout = true;
+                timeoutError.cause = e;
+                if (timeoutId) clearTimeout(timeoutId);
+                throw timeoutError;
+            }
+            /* réponse vide */
+        }
+        if (timeoutId) clearTimeout(timeoutId);
         if (!resp.ok) {
             const err = new Error((payload && payload.error) || `Erreur serveur (${resp.status})`);
             // Le code HTTP et l'en-tête Retry-After (si présent) sont
@@ -160,11 +179,16 @@
          * façon disponible localement.
          */
         async syncSearch(record) {
-            if (!AuthAPI.isAuthenticated()) return null;
+            if (!AuthAPI.isAuthenticated()) {
+                AuthAPI.lastSyncError = { status: 0, message: 'Session locale absente ou expirée.', recordId: record?.id };
+                return null;
+            }
             try {
+                AuthAPI.lastSyncError = null;
                 return await apiCall('/api/telemetry/checkin', { method: 'POST', auth: true, body: { record } });
             } catch (e) {
-                console.warn('Synchronisation serveur échouée (conservée localement) :', e.message);
+                AuthAPI.lastSyncError = { status: e.status || 0, message: e.message, recordId: record?.id };
+                console.error('Synchronisation recherche échouée :', AuthAPI.lastSyncError);
                 return null;
             }
         },
@@ -212,13 +236,18 @@
          */
         async syncDelta(since, sinceId, limit = 3000) {
             const qs = `?since=${encodeURIComponent(since)}&sinceId=${sinceId}&limit=${limit}`;
-            return apiCall('/api/registry/feed' + qs, { auth: true });
+            // Un delta bloqué ne doit jamais maintenir indéfiniment le
+            // spinner du dashboard. Le serveur peut être lent, mais une
+            // tentative doit se terminer et être reprogrammée proprement.
+            return apiCall('/api/registry/feed' + qs, { auth: true, timeoutMs: 30000 });
         },
 
         /** Total de fiches dans le registre — utilisé uniquement pour
          *  afficher une progression de synchronisation lisible. */
         async getRegistryCount() {
-            return apiCall('/api/registry/stats', { auth: true });
+            // La page Synchronisation ne doit pas rester en chargement si
+            // le réseau tombe après l'ouverture de la PWA.
+            return apiCall('/api/registry/stats', { auth: true, timeoutMs: 30000 });
         },
 
         /** [Admin uniquement] Résumé IA des logs/erreurs des 7 derniers
