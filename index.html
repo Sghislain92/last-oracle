@@ -66,7 +66,7 @@
     @media(max-width:480px){.oracle-tab-btn{font-size:.8rem;padding:14px 8px;gap:4px}.oracle-tab-btn svg{width:16px;height:16px}.oracle-tab-body{padding:20px 16px 24px}.oracle-tab-panel h2{font-size:1.1rem}.oracle-input-wrap{height:46px}.oracle-input-wrap input{font-size:.85rem}}
     @media(max-width:900px){.oracle-tab-btn{font-size:.78rem;padding:14px 6px;gap:5px}.oracle-tab-btn .lbl-full{display:none}.oracle-tab-btn .lbl-short{display:inline}}
 
-    .loading-spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+    .loading-spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}.sync-card-spinner{display:inline-block;width:14px;height:14px;border:2px solid #ee7b3d35;border-top-color:var(--orange);border-radius:50%;vertical-align:-2px;animation:spin 1.1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
     .modal-overlay{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:18px;background:#101a22cc;backdrop-filter:blur(8px);animation:fadeIn .2s ease}.modal-box{width:min(480px,100%);max-height:90vh;overflow-y:auto;padding:28px 30px 26px;border:1px solid #ffffff2a;border-radius:var(--r-xl);background:var(--card);box-shadow:0 34px 90px -12px rgba(15,25,34,.38);animation:slideUp .25s var(--ease)}.modal-box .close-btn{float:right;width:32px;height:32px;border:0;border-radius:var(--r-sm);color:#96a0a8;background:transparent;font-size:18px;line-height:1;transition:.15s;display:grid;place-items:center}.modal-box .close-btn:hover{background:#ece8dc}.modal-box .close-btn svg{width:18px;height:18px}
     .modal-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0;padding:16px 0;border-top:1px solid #efede7;border-bottom:1px solid #efede7}.modal-field span{display:block;color:var(--muted);font-size:9px}.modal-field b{display:block;margin-top:4px;font-size:11px;font-weight:700}
     .modal-actions{display:flex;gap:10px;margin-top:16px;flex-wrap:nowrap}.modal-actions button{flex:1 1 0;min-width:0;justify-content:center}
@@ -241,6 +241,89 @@ function translateErrorMessage(msg) {
 }
 
 const KEYS = { history: 'oracle_history_v2', logs: 'oracle_logs_v2', permission: 'oracle_geo_permission_v2', outbox: 'oracle_sync_outbox_v2', errors: 'oracle_admin_errors_v1', adminLogs: 'oracle_admin_logs_v1', syncQueue: 'oracle_sync_queue_v1' };
+const SYNC_STATE_KEY = 'oracle_sync_state_v1';
+const SYNC_EVENTS_KEY = 'oracle_sync_status_events_v1';
+let syncState = load(SYNC_STATE_KEY, {
+    status: 'unknown',
+    pendingCount: 0,
+    lastConfirmedAt: null,
+    lastAttemptAt: null,
+    nextRetryAt: null,
+    lastError: null
+});
+let syncStatusEvents = load(SYNC_EVENTS_KEY, []);
+
+function saveSyncState() { save(SYNC_STATE_KEY, syncState); }
+function recordSyncStatusTransition(nextStatus, detail = '') {
+    if (!nextStatus || nextStatus === syncState.status) return;
+    syncStatusEvents = [{
+        status: nextStatus,
+        detail: detail || syncStatusLabel(nextStatus),
+        at: new Date().toISOString()
+    }, ...syncStatusEvents].slice(0, 20);
+    save(SYNC_EVENTS_KEY, syncStatusEvents);
+}
+function updateSyncState(patch, rerender = true) {
+    if (patch.status && patch.status !== syncState.status) {
+        recordSyncStatusTransition(patch.status, patch.lastError || syncStatusLabel(patch.status));
+    }
+    syncState = { ...syncState, ...patch };
+    saveSyncState();
+    if (rerender && page === 'home') render();
+}
+
+function syncStatusLabel(status) {
+    return {
+        up_to_date: 'À jour',
+        syncing: 'Mise à jour…',
+        update_available: 'Mise à jour disponible',
+        pending: 'Éléments en attente',
+        offline: 'Hors connexion',
+        server_unreachable: 'Serveur injoignable',
+        session_expired: 'Session à renouveler',
+        rate_limited: 'Reprise différée',
+        unknown: 'État non vérifié'
+    }[status] || 'État non vérifié';
+}
+
+function syncStatusColor(status) {
+    if (status === 'up_to_date') return 'var(--green)';
+    if (status === 'syncing' || status === 'update_available' || status === 'pending') return 'var(--orange)';
+    if (status === 'offline' || status === 'unknown') return 'var(--muted)';
+    return 'var(--orange-deep)';
+}
+
+function getDashboardSyncSecondary(stats) {
+    if (stats.status === 'syncing') return stats.pending ? `${stats.pending} élément${stats.pending > 1 ? 's' : ''} en traitement` : 'Mise à jour en cours';
+    if (stats.status === 'update_available') return stats.pending ? `${stats.pending} fiche${stats.pending > 1 ? 's' : ''} à recevoir` : 'Mise à jour disponible';
+    if (stats.status === 'offline') return 'Données conservées localement';
+    if (stats.status === 'server_unreachable') return `Dernière confirmation : ${formatDashboardAge(stats.lastTimestamp).replace('MAJ : ', '')}`;
+    if (stats.status === 'session_expired') return 'Reconnectez-vous pour reprendre';
+    if (stats.status === 'rate_limited') return 'Nouvelle tentative automatique prévue';
+    if (stats.pending) return `${stats.pending} élément${stats.pending > 1 ? 's' : ''} en attente`;
+    return formatDashboardAge(stats.lastTimestamp);
+}
+
+function getLastSyncTransitionLabel() {
+    const event = syncStatusEvents[0];
+    if (!event || !event.at) return '';
+    return `Statut modifié ${new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' }).format(new Date(event.at))}`;
+}
+
+function renderSyncStatusCard(stats, options = {}) {
+    const isBusy = ['syncing', 'update_available'].includes(stats.status);
+    const title = stats.pending && !['syncing', 'server_unreachable', 'offline', 'session_expired'].includes(stats.status)
+        ? `${stats.pending} en attente`
+        : syncStatusLabel(stats.status);
+    const secondary = getDashboardSyncSecondary(stats);
+    const fontSize = stats.status === 'server_unreachable' || stats.status === 'session_expired' ? '16' : stats.status === 'syncing' ? '18' : '21';
+    return `<div class="stat sync-status-card" style="padding:16px;border:1px solid ${isBusy ? '#f0b987' : 'var(--line)'};border-radius:12px;background:${isBusy ? 'linear-gradient(145deg,#fffdf8,#fff1e6)' : 'var(--card)'};cursor:pointer;box-shadow:${isBusy ? '0 5px 16px rgba(238,123,61,.08)' : 'none'}" data-page="sync-status" aria-label="État de la synchronisation">
+        <p style="display:flex;align-items:center;gap:5px;color:var(--muted);font-size:9px;font-weight:700;margin:0"><span style="width:26px;height:26px;display:inline-grid;place-items:center;border-radius:50%;color:${isBusy ? 'var(--orange)' : 'var(--muted)'};background:${isBusy ? '#fde7d5' : '#eef0ee'}"><i data-lucide="refresh-cw" style="width:14px;height:14px"></i></span> Synchronisation</p>
+        <strong style="display:flex;align-items:center;gap:5px;margin-top:12px;font-size:${fontSize}px;color:${syncStatusColor(stats.status)}">${isBusy ? '<span class="sync-card-spinner" aria-hidden="true"></span>' : ''}${title}</strong>
+        <small style="color:#9ba5ad;font-size:8px;display:block;margin-top:7px">${secondary}</small>
+        ${['server_unreachable', 'offline', 'session_expired', 'rate_limited'].includes(stats.status) && getLastSyncTransitionLabel() ? `<small style="color:#b8a99f;font-size:7px;display:block;margin-top:4px">${getLastSyncTransitionLabel()}</small>` : ''}
+    </div>`;
+}
 let history = load(KEYS.history, []);
 let logs = load(KEYS.logs, []);
 let permission = localStorage.getItem(KEYS.permission) === 'granted' ? 'granted' : 'prompt';
@@ -1070,7 +1153,15 @@ async function runSearch(vin) {
 
         history = [record, ...history];
         save(KEYS.history, history);
-        if (window.AuthAPI && AuthAPI.isAuthenticated()) { AuthAPI.syncSearch(record).then(result => { if (!result) queueSyncItem('search', record); }); }
+        if (window.AuthAPI) {
+            AuthAPI.syncSearch(record).then(result => {
+                if (!result) {
+                    queueSyncItem('search', record);
+                    const failure = AuthAPI.lastSyncError || { status: 0, message: 'Échec inconnu.' };
+                    addLog('Synchronisation recherche', 'error', `Recherche non envoyée au serveur : ${failure.message}`, { httpStatus: failure.status || 'réseau', recordId: record.id });
+                }
+            });
+        }
 
         if (resultBox) resultBox.innerHTML = buildResult(record);
         scrollToResultCard();
@@ -1516,7 +1607,10 @@ async function selectAdminMapSource(key) {
     const mapCanvas = document.getElementById('map-canvas');
     if (mapCanvas) mapCanvas.innerHTML = `<div class="empty" style="height:100%;display:grid;place-items:center"><span class="loading-spinner" style="border-top-color:var(--orange);width:22px;height:22px"></span></div>`;
     try {
-        const result = key === 'all' ? await AuthAPI.getUserHistory() : await AuthAPI.getUserHistory(key);
+        // Sans userId, l'API renvoie l'historique de la session courante.
+        // La valeur explicite « all » est nécessaire pour que l'admin
+        // obtienne les positions de tous les utilisateurs.
+        const result = await AuthAPI.getUserHistory(key === 'all' ? 'all' : key);
         mapDataSource = (result.history || []).map(mapHistoryRow);
         renderMap();
     } catch (err) {
@@ -1529,6 +1623,53 @@ async function selectAdminMapSource(key) {
 // ================================================================
 
 let adminUsersCache = null;
+let dashboardAdminStatsLoading = false;
+
+function getDashboardSyncStats() {
+    const queue = load(KEYS.syncQueue, []);
+    const immatQueue = load(IMMAT_PENDING_KEY, []);
+    const pending = queue.length + immatQueue.length;
+    const attempts = [...queue, ...immatQueue]
+        .map(item => item.createdAt ? new Date(item.createdAt).getTime() : 0)
+        .filter(Boolean);
+    const cursor = loadSyncCursor();
+    const lastTimestamp = attempts.length
+        ? Math.max(...attempts)
+        : (cursor.since && cursor.since !== '1970-01-01 00:00:00' ? new Date(toIso(cursor.since)).getTime() : 0);
+    const statePending = Number(syncState.pendingCount || 0);
+    return {
+        pending: Math.max(pending, statePending),
+        lastTimestamp: syncState.lastConfirmedAt ? new Date(syncState.lastConfirmedAt).getTime() : lastTimestamp,
+        status: syncState.status,
+        lastError: syncState.lastError,
+        nextRetryAt: syncState.nextRetryAt
+    };
+}
+
+function formatDashboardAge(timestamp) {
+    if (!timestamp || !Number.isFinite(timestamp)) return 'Aucune synchronisation enregistrée';
+    const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+    if (minutes < 1) return 'MAJ : à l’instant';
+    if (minutes < 60) return `MAJ : il y a ${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `MAJ : il y a ${hours} h`;
+    return `MAJ : ${fmt(new Date(timestamp).toISOString())}`;
+}
+
+async function loadDashboardAdminStats() {
+    if (dashboardAdminStatsLoading || !window.AuthAPI || !AuthAPI.isAdmin()) return;
+    dashboardAdminStatsLoading = true;
+    try {
+        const result = await AuthAPI.getUsers();
+        adminUsersCache = { ...result, users: (result.users || []).map(mapUserRow) };
+        if (page === 'home') render();
+    } catch (e) {
+        // Le dashboard ne bloque pas si le résumé admin est momentanément
+        // indisponible. Aucun nombre fictif n'est affiché.
+    } finally {
+        dashboardAdminStatsLoading = false;
+    }
+}
 // Contrairement à adminUsersCache (données sensibles, jamais mises en cache
 // hors session), les erreurs sont utiles pour le diagnostic même hors
 // ligne — on les restaure depuis le dernier chargement connu au démarrage,
@@ -1955,18 +2096,31 @@ async function loadSyncStatusData(fetchRemoteTotal = true) {
     try {
         const [synced, cursor] = await Promise.all([idbCount(), Promise.resolve(loadSyncCursor())]);
         let total = syncProgressState.total || 0;
+        let serverLatestUpdatedAt = null;
         if (fetchRemoteTotal && navigator.onLine && window.AuthAPI && AuthAPI.isAuthenticated()) {
             try {
                 const countResult = await AuthAPI.getRegistryCount();
                 total = countResult.total || total;
+                serverLatestUpdatedAt = countResult.latestUpdatedAt || null;
                 syncProgressState.total = total;
-            } catch (e) { /* on garde la dernière valeur connue */ }
+                if (syncState.status !== 'syncing') updateSyncState({ status: 'up_to_date', lastConfirmedAt: new Date().toISOString(), lastError: null }, false);
+            } catch (e) {
+                updateSyncState({ status: 'server_unreachable', lastAttemptAt: new Date().toISOString(), lastError: e.message || 'Serveur injoignable' }, false);
+            }
+        } else if (!navigator.onLine) {
+            updateSyncState({ status: 'offline', lastAttemptAt: new Date().toISOString() }, false);
+        } else if (!window.AuthAPI || !AuthAPI.isAuthenticated()) {
+            updateSyncState({ status: 'session_expired', lastAttemptAt: new Date().toISOString() }, false);
         }
         if (!document.getElementById('sync-status-cards')) return; // page quittée pendant l'attente réseau
 
         const remaining = Math.max(0, total - synced);
         const pct = total > 0 ? Math.min(100, Math.round((synced / total) * 100)) : 0;
         const lastSyncLabel = cursor.since && cursor.since !== '1970-01-01 00:00:00' ? fmt(toIso(cursor.since), true) : 'Jamais encore';
+        const localCursorDate = cursor.since ? new Date(toIso(cursor.since)).getTime() : 0;
+        const serverLatestDate = serverLatestUpdatedAt ? new Date(toIso(serverLatestUpdatedAt)).getTime() : 0;
+        const serverHasNewerData = !!(localCursorDate && serverLatestDate && serverLatestDate > localCursorDate);
+        const effectiveStatus = serverHasNewerData ? 'update_available' : syncState.status;
 
         document.getElementById('sync-status-cards').innerHTML = `
             <div style="grid-column:1/-1;padding:20px;border-radius:16px;background:linear-gradient(155deg,#1e2f3d,var(--ink-deep));color:#fff">
@@ -1988,7 +2142,15 @@ async function loadSyncStatusData(fetchRemoteTotal = true) {
             </div>
             <div style="grid-column:1/-1;padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--card);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
                 <span style="font-size:10px;color:var(--muted)"><i data-lucide="clock-3" style="width:12px;height:12px;display:inline;vertical-align:-2px"></i> Dernière donnée reçue : ${lastSyncLabel}</span>
-                ${remaining > 0 ? `<span style="font-size:10px;color:var(--muted)">Reprend automatiquement — aucune action requise</span>` : `<span class="badge success"><i></i>À jour</span>`}
+                ${effectiveStatus === 'server_unreachable'
+                    ? `<span style="font-size:10px;color:var(--orange-deep)">Serveur injoignable — dernière confirmation : ${formatDashboardAge(syncState.lastConfirmedAt ? new Date(syncState.lastConfirmedAt).getTime() : localCursorDate).replace('MAJ : ', '')}</span>`
+                    : effectiveStatus === 'offline'
+                        ? `<span style="font-size:10px;color:var(--muted)">Hors connexion — données conservées localement</span>`
+                        : effectiveStatus === 'session_expired'
+                            ? `<span style="font-size:10px;color:var(--orange-deep)">Session à renouveler</span>`
+                            : remaining > 0 || serverHasNewerData
+                                ? `<span style="font-size:10px;color:var(--orange-deep)">Mise à jour disponible — synchronisation en cours</span>`
+                                : `<span class="badge success"><i></i>À jour</span>`}
             </div>
         `;
         lucide.createIcons();
@@ -2460,7 +2622,16 @@ function addLog(type, status, message, metadata) {
     const entry = { id: id(), createdAt: new Date().toISOString(), type, status, message, metadata };
     logs = [entry, ...logs].slice(0, 200);
     save(KEYS.logs, logs);
-    if (window.AuthAPI && AuthAPI.isAuthenticated()) { AuthAPI.syncLog(entry).then(result => { if (!result) queueSyncItem('log', entry); }); }
+    // Le journal reste visible localement immédiatement. S'il n'y a pas
+    // encore de session valide, on le met tout de même en file : après la
+    // reconnexion, le serveur l'enregistrera dans tech_logs avec l'agent
+    // réellement authentifié, sans demander à l'utilisateur d'effacer ses
+    // données ou de reconfigurer la PWA.
+    if (window.AuthAPI && AuthAPI.isAuthenticated()) {
+        AuthAPI.syncLog(entry).then(result => { if (!result) queueSyncItem('log', entry); });
+    } else {
+        queueSyncItem('log', entry);
+    }
 }
 
 async function syncPending() {
@@ -2971,8 +3142,12 @@ function renderHome() {
     const found = history.filter(r => r.status === 'found').length;
     const prec = history.filter(r => r.accuracy != null && r.accuracy <= 10).length;
     const week = history.filter(r => Date.now() - new Date(r.searchedAt) < 604800000).length;
-    const errors = logs.filter(l => l.status === 'error').length;
     const currentUser = window.AuthAPI ? AuthAPI.getCurrentUser() : null;
+    const isAdmin = window.AuthAPI && AuthAPI.isAdmin();
+    const syncStats = getDashboardSyncStats();
+    const adminUsers = (adminUsersCache && adminUsersCache.users) || [];
+    const adminTotal = adminUsersCache ? Number(adminUsersCache.total || adminUsers.length) : null;
+    const adminActive = adminUsersCache ? adminUsers.filter(u => u.active).length : null;
     // "Yaovi Ghislain" -> on ne garde que le tout premier prénom.
     const firstName = currentUser && currentUser.prenoms ? currentUser.prenoms.trim().split(/\s+/)[0] : 'Agent';
     return `
@@ -2995,7 +3170,11 @@ function renderHome() {
             <div class="stat" style="padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--card)"><p style="color:var(--muted);font-size:9px;font-weight:700;margin:0"><i data-lucide="search" style="width:14px;height:14px;display:inline"></i> Recherches</p><strong style="font-size:28px">${total}</strong><small style="color:#9ba5ad;font-size:8px;display:block">${week} cette semaine</small></div>
             <div class="stat" style="padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--card)"><p style="color:var(--muted);font-size:9px;font-weight:700;margin:0"><i data-lucide="check-circle-2" style="width:14px;height:14px;display:inline"></i> Identifiés</p><strong style="font-size:28px">${found}</strong><small style="color:#9ba5ad;font-size:8px;display:block">${total ? Math.round(found/total*100) : 0}% de correspondance</small></div>
             <div class="stat" style="padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--card)"><p style="color:var(--muted);font-size:9px;font-weight:700;margin:0"><i data-lucide="target" style="width:14px;height:14px;display:inline"></i> Positions précises</p><strong style="font-size:28px">${prec}</strong><small style="color:#9ba5ad;font-size:8px;display:block">Précision ≤ 10 m</small></div>
-            <div class="stat" style="padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--card)"><p style="color:var(--muted);font-size:9px;font-weight:700;margin:0"><i data-lucide="alert-circle" style="width:14px;height:14px;display:inline"></i> Erreurs</p><strong style="font-size:28px;color:${errors ? 'var(--red)' : 'var(--green)'}">${errors}</strong><small style="color:#9ba5ad;font-size:8px;display:block">${errors ? 'Voir les détails dans Erreurs' : 'Aucune erreur'}</small></div>
+            ${isAdmin ? `
+            <div class="stat" style="padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--card);cursor:pointer" data-page="admin-users"><p style="color:var(--muted);font-size:9px;font-weight:700;margin:0"><i data-lucide="users" style="width:14px;height:14px;display:inline"></i> Utilisateurs</p><strong style="font-size:28px;color:var(--ink)">${adminTotal === null ? '—' : adminTotal.toLocaleString('fr-FR')}</strong><small style="color:#9ba5ad;font-size:8px;display:block">${adminActive === null ? 'Chargement du nombre actif' : `${adminActive.toLocaleString('fr-FR')} actifs`}</small></div>
+            ` : `
+            ${renderSyncStatusCard(syncStats)}
+            `}
         </div>
 
         <div class="home-search">
@@ -3188,6 +3367,8 @@ function saveSyncCursor(cursor) {
 }
 
 let registrySyncInFlight = false;
+const SESSION_REFRESH_KEY = 'oracle_session_last_refresh_v1';
+const SESSION_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /** Synchronise IndexedDB avec le serveur, par pages, en repartant
  *  toujours du dernier curseur connu (jamais un retéléchargement complet
@@ -3251,9 +3432,33 @@ function setSyncCooldown(ms) {
 }
 
 async function syncRegistryDelta() {
-    if (registrySyncInFlight || !navigator.onLine || !window.AuthAPI || !AuthAPI.isAuthenticated()) return;
+    if (registrySyncInFlight) return;
+    if (!navigator.onLine) {
+        updateSyncState({ status: 'offline', lastAttemptAt: new Date().toISOString() }, false);
+        return;
+    }
+    if (!window.AuthAPI || !AuthAPI.isAuthenticated()) {
+        updateSyncState({ status: 'session_expired', lastAttemptAt: new Date().toISOString() }, false);
+        return;
+    }
     if (isSyncInCooldown()) return; // en repos suite à un 429 récent — on n'insiste pas
     registrySyncInFlight = true;
+    updateSyncState({ status: 'syncing', lastAttemptAt: new Date().toISOString(), lastError: null }, false);
+    // Une PWA standalone peut rester ouverte plusieurs jours. Le token local
+    // peut alors exister tout en étant expiré côté serveur ; dans ce cas la
+    // synchronisation échouait jusqu'à une déconnexion/reconnexion manuelle.
+    // Revalider ici renouvelle le token sans effacer les données locales.
+    let lastSessionRefresh = 0;
+    try { lastSessionRefresh = Number(localStorage.getItem(SESSION_REFRESH_KEY) || 0); } catch (e) {}
+    if (Date.now() - lastSessionRefresh >= SESSION_REFRESH_INTERVAL_MS) {
+        const refreshedUser = await AuthAPI.refreshSession();
+        if (!refreshedUser) {
+            registrySyncInFlight = false;
+            updateSyncState({ status: 'session_expired' }, false);
+            return;
+        }
+        try { localStorage.setItem(SESSION_REFRESH_KEY, String(Date.now())); } catch (e) {}
+    }
     const cursor = loadSyncCursor();
     const isFirstSync = cursor.sinceId === 0 && cursor.since === '1970-01-01 00:00:00';
     let totalSynced = 0;
@@ -3265,6 +3470,18 @@ async function syncRegistryDelta() {
         try {
             const countResult = await AuthAPI.getRegistryCount();
             syncProgressState.total = countResult.total || 0;
+            // La vérification du résumé est légère. Si ni la date ni l'id
+            // de la dernière ligne serveur n'ont changé, il n'y a aucun
+            // delta à télécharger : on évite donc une seconde requête
+            // coûteuse vers /api/registry/feed.
+            const serverLatest = countResult.latestUpdatedAt ? new Date(toIso(countResult.latestUpdatedAt)).getTime() : 0;
+            const localLatest = cursor.since ? new Date(toIso(cursor.since)).getTime() : 0;
+            const serverLatestId = Number(countResult.latestUpdatedId || 0);
+            if (!isFirstSync && serverLatest && localLatest &&
+                (serverLatest < localLatest || (serverLatest === localLatest && serverLatestId <= cursor.sinceId))) {
+                updateSyncState({ status: 'up_to_date', pendingCount: 0, lastConfirmedAt: new Date().toISOString(), lastError: null }, false);
+                return;
+            }
         } catch (e) { /* affichage de progression best-effort seulement */ }
 
         let hasMore = true;
@@ -3340,12 +3557,23 @@ async function syncRegistryDelta() {
                 ? `Registre local initialisé (${totalSynced} fiche(s)).${remaining}`
                 : `${totalSynced} fiche(s) mise(s) à jour localement.${remaining}`, { totalSynced, pages: pageCount, resteAFaire: hasMore, dureeMs: Date.now() - startedAt });
         }
+        updateSyncState({ status: hasMore ? 'update_available' : 'up_to_date', pendingCount: hasMore ? 1 : 0, lastConfirmedAt: new Date().toISOString(), lastError: null }, false);
     } catch (e) {
+        const status = e && e.status === 429 ? 'rate_limited' : (e && e.status === 401 ? 'session_expired' : 'server_unreachable');
+        const lastError = e && e.isTimeout
+            ? 'Le serveur n’a pas répondu dans le délai prévu.'
+            : (e && e.message ? e.message : 'Échec de communication avec le serveur.');
+        updateSyncState({ status, lastAttemptAt: new Date().toISOString(), lastError }, false);
         addLog('Synchronisation registre', 'error', translateErrorMessage(e.message) || 'Échec de la synchronisation du registre local.', { messageOriginal: e && e.message, statutHttp: e && e.status });
     } finally {
         registrySyncInFlight = false;
         syncProgressState.syncing = false;
         renderSyncBadge();
+        // La page Synchronisation se rafraîchit périodiquement, mais le
+        // dashboard reste affiché sans changer de page. Il doit donc être
+        // rerendu après la fin réelle du traitement, lorsque l'état n'est
+        // plus "syncing" et que le spinner peut disparaître.
+        if (page === 'home') render();
     }
 }
 
@@ -3437,6 +3665,10 @@ async function syncPendingImmatriculations() {
     save(IMMAT_PENDING_KEY, remaining);
 }
 window.addEventListener('online', () => { syncPendingImmatriculations(); syncPendingSearchesAndLogs(); restoreServerData(); syncRegistryDelta(); });
+window.addEventListener('offline', () => {
+    updateSyncState({ status: 'offline', lastAttemptAt: new Date().toISOString() });
+    if (page === 'sync-status') loadSyncStatusData(false);
+});
 
 // Cycle de secours périodique — la plupart des synchros se termineront
 // maintenant en une seule fois (budget de temps, plus de plafond de
@@ -3449,7 +3681,10 @@ window.addEventListener('online', () => { syncPendingImmatriculations(); syncPen
 // protection anti-abus de l'hébergeur (429) — déjà vécu une fois. Un peu
 // d'aléatoire (±3 min) évite en plus que tous les appareils, démarrés à
 // peu près en même temps le matin, tapent le serveur à la même seconde.
-const SYNC_PERIODIC_INTERVAL_MS = (15 * 60 * 1000) + (Math.random() * 6 * 60 * 1000 - 3 * 60 * 1000);
+// Fraîcheur cible de 10 à 15 minutes, avec un décalage aléatoire propre à
+// chaque appareil. La requête périodique ne télécharge rien si le résumé
+// serveur n'a pas changé ; le delta n'est demandé qu'en cas de nouveauté.
+const SYNC_PERIODIC_INTERVAL_MS = (10 * 60 * 1000) + (Math.random() * 5 * 60 * 1000);
 setInterval(() => { syncRegistryDelta(); }, SYNC_PERIODIC_INTERVAL_MS);
 
 // ================================================================
@@ -3619,7 +3854,15 @@ async function runImmatSearch(value) {
             addLog('Position non obtenue', 'warning', `Recherche immatriculation enregistrée sans coordonnées — ${gps.errorLabel || gps.errorCode}.`, { errorCode: gps.errorCode, immatriculation: normalized });
         }
         history=[record,...history]; save(KEYS.history,history);
-        if (window.AuthAPI && AuthAPI.isAuthenticated()) { AuthAPI.syncSearch(record).then(result => { if (!result) queueSyncItem('search', record); }); }
+        if (window.AuthAPI) {
+            AuthAPI.syncSearch(record).then(result => {
+                if (!result) {
+                    queueSyncItem('search', record);
+                    const failure = AuthAPI.lastSyncError || { status: 0, message: 'Échec inconnu.' };
+                    addLog('Synchronisation recherche', 'error', `Recherche non envoyée au serveur : ${failure.message}`, { httpStatus: failure.status || 'réseau', recordId: record.id });
+                }
+            });
+        }
         addLog('Recherche via immatriculation ' + normalized,
             resolved.current ? 'success' : (resolved.confirmed ? 'warning' : 'warning'),
             resolved.current ? 'Immatriculation identifiée' : (resolved.confirmed ? 'Immatriculation non trouvée (confirmé)' : 'Introuvable en local, synchro possiblement incomplète — pas confirmé'),
@@ -4223,6 +4466,7 @@ if (isInstallLandingPath) {
         } else {
             startGpsBackground();
             render();
+            loadDashboardAdminStats();
             watchLivePermissionChanges();
         }
         if (permission === 'granted') {
