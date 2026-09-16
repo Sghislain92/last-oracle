@@ -1,4 +1,4 @@
-const VERSION = "v19";
+const VERSION = "v23.1";
 const SHELL_CACHE = `oracle-shell-${VERSION}`;
 const RUNTIME_CACHE = `oracle-runtime-${VERSION}`;
 
