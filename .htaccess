@@ -1,4 +1,12 @@
 RewriteEngine On
+# Sans RewriteBase, Apache doit deviner comment recalculer le chemin
+# après chaque réécriture interne — l'absence de cette directive est la
+# cause la plus documentée de "AH00124: exceeded 10 internal redirects".
+# Ne change rien au comportement des règles qui fonctionnent déjà ;
+# élimine juste l'ambiguïté qui peut, dans certaines conditions
+# (rechargement de config, worker PHP-FPM redémarré en plein traitement),
+# faire boucler le moteur de réécriture sur lui-même.
+RewriteBase /
 
 # Apache/mod_php ne transmet PAS l'en-tête Authorization à PHP par
 # défaut (comportement historique, source classique de faux 401) — on
@@ -35,13 +43,13 @@ RewriteRule ^api/telemetry/device/?$   api/track-install.php [L,QSA]
 RewriteRule ^api/registry/report/?$    api/sync/immatriculations.php [L,QSA]
 RewriteRule ^api/registry/bulk/?$      api/admin/import-immatriculations.php [L,QSA]
 RewriteRule ^api/registry/lookup/?$    api/search-registry.php [L,QSA]
+RewriteRule ^api/registry/extract-certificate/?$ api/reverse-immat/extract-certificate.php [L,QSA]
 RewriteRule ^api/registry/feed/?$      api/sync-delta.php [L,QSA]
 RewriteRule ^api/registry/stats/?$     api/registry-count.php [L,QSA]
 RewriteRule ^api/gateway/?$            api/proxy.php [L,QSA]
 RewriteRule ^api/accounts/keys/?$      api/admin/api-keys.php [L,QSA]
 RewriteRule ^api/accounts/keys/revoke/?$ api/admin/revoke-api-key.php [L,QSA]
 RewriteRule ^api/accounts/insights/?$  api/admin/ai-insights.php [L,QSA]
-RewriteRule ^api/accounts/backfill/?$  api/admin/backfill-normalized.php [L,QSA]
 
 # PORTAIL PARTENAIRES — même principe que ci-dessus, appliqué à
 # api/portal/*.php (auparavant appelés en direct par
