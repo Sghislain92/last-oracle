@@ -10,6 +10,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') sendJson(405, ['error' => 'Méthode no
 requireAuth();
 
 $pdo = getPdo();
-$total = (int)$pdo->query('SELECT COUNT(*) AS n FROM immatriculations')->fetch()['n'];
+$summary = $pdo->query('SELECT COUNT(*) AS n, MAX(updated_at) AS latest_updated_at FROM immatriculations')->fetch();
+$latest = $pdo->query('SELECT id, updated_at FROM immatriculations ORDER BY updated_at DESC, id DESC LIMIT 1')->fetch();
+$total = (int)$summary['n'];
 
-sendJson(200, ['ok' => true, 'total' => $total]);
+sendJson(200, [
+    'ok' => true,
+    'total' => $total,
+    'latestUpdatedAt' => $summary['latest_updated_at'],
+    'latestUpdatedId' => $latest ? (int)$latest['id'] : 0,
+]);
